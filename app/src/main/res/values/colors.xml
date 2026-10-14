@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="purple_200">#FFBB86FC</color>
+    <color name="purple_500">#FF6200EE</color>
+    <color name="purple_700">#FF3700B3</color>
+    <color name="teal_200">#FF03DAC5</color>
+    <color name="teal_700">#FF018786</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <!-- App specific -->
+    <color name="method_get">#2E7D32</color>
+    <color name="method_post">#E65100</color>
+    <color name="method_put">#1565C0</color>
+    <color name="method_delete">#B71C1C</color>
+    <color name="method_other">#546E7A</color>
+
+    <color name="status_2xx">#2E7D32</color>
+    <color name="status_3xx">#1565C0</color>
+    <color name="status_4xx">#E65100</color>
+    <color name="status_5xx">#B71C1C</color>
+
+    <color name="code_background">#FF1E1E1E</color>
+    <color name="code_text">#FFD4D4D4</color>
+
+    <color name="seed">#6650A4</color>
+</resources>

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CS3 Extension Builder</string>
+
+    <!-- Navigation -->
+    <string name="nav_browser">Browser</string>
+    <string name="nav_logs">Logs</string>
+    <string name="nav_code">Code</string>
+
+    <!-- Browser -->
+    <string name="hint_enter_url">Enter URL or search…</string>
+    <string name="btn_go">Go</string>
+    <string name="fab_clear_logs">Clear Logs</string>
+
+    <!-- Log -->
+    <string name="empty_logs">No requests captured yet.\nBrowse a site to start capturing traffic.</string>
+    <string name="menu_clear_logs">Clear Logs</string>
+    <string name="menu_generate_cs3">Generate CS3</string>
+
+    <!-- Code -->
+    <string name="label_log_summary">Log Summary</string>
+    <string name="label_generated_code">Generated Kotlin Code</string>
+    <string name="placeholder_summary">Generate CS3 code from the Logs tab to see the summary here.</string>
+    <string name="placeholder_code">// Generated CS3 provider code will appear here.\n// Go to the Logs tab and tap "Generate CS3".</string>
+    <string name="btn_copy">Copy</string>
+    <string name="btn_share_file">Share .kt</string>
+    <string name="btn_share_claude">Share with Claude</string>
+</resources>
