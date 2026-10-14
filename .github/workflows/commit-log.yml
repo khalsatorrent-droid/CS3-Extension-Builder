@@ -1,0 +1,54 @@
+name: Commit Log
+
+on:
+  push:
+    branches: [ master, main ]
+
+jobs:
+  notify:
+    name: Post Commit Notifications
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Build commit message
+        id: message
+        run: |
+          COMMIT_HASH="${{ github.sha }}"
+          SHORT_HASH="${COMMIT_HASH:0:7}"
+          COMMIT_MSG=$(git log -1 --pretty=format:"%s")
+          AUTHOR=$(git log -1 --pretty=format:"%an")
+          BRANCH="${{ github.ref_name }}"
+          REPO="${{ github.repository }}"
+          RUN_URL="https://github.com/$REPO/commit/$COMMIT_HASH"
+
+          MESSAGE="📦 **CS3 Extension Builder**
+          Branch: \`$BRANCH\`
+          Commit: [\`$SHORT_HASH\`]($RUN_URL) — $COMMIT_MSG
+          Author: $AUTHOR"
+
+          echo "message<<EOF" >> $GITHUB_OUTPUT
+          echo "$MESSAGE" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Post to Discord
+        if: ${{ secrets.DISCORD_WEBHOOK_URL != '' }}
+        uses: Ilshidur/action-discord@0.3.2
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        with:
+          args: ${{ steps.message.outputs.message }}
+
+      - name: Post to Telegram
+        if: ${{ secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
+        uses: appleboy/telegram-action@v1.0.0
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message_thread_id: ${{ secrets.TELEGRAM_TOPIC_ID }}
+          format: markdown
+          message: ${{ steps.message.outputs.message }}

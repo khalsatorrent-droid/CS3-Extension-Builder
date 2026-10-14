@@ -1,0 +1,92 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build & Publish Rolling Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION_NAME=$(grep '^android.versionName=' version.properties | cut -d= -f2)
+          VERSION_CODE=$(grep '^android.versionCode=' version.properties | cut -d= -f2)
+          echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
+          echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
+
+      - name: Set up signing keystore
+        run: |
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "Using production keystore"
+            echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > ci/release.jks
+            echo "KEY_STORE_PATH=$PWD/ci/release.jks" >> $GITHUB_ENV
+            echo "KEY_STORE_PASS=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >> $GITHUB_ENV
+            echo "KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> $GITHUB_ENV
+            echo "KEY_PASS=${{ secrets.ANDROID_KEY_PASSWORD }}" >> $GITHUB_ENV
+          else
+            echo "Using sideload keystore"
+            cat ci/sideload.jks.b64 | base64 -d > ci/release.jks
+            echo "KEY_STORE_PATH=$PWD/ci/release.jks" >> $GITHUB_ENV
+            echo "KEY_STORE_PASS=android" >> $GITHUB_ENV
+            echo "KEY_ALIAS=release" >> $GITHUB_ENV
+            echo "KEY_PASS=android" >> $GITHUB_ENV
+          fi
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build release APK
+        run: |
+          ./gradlew assembleRelease --no-daemon --stacktrace \
+            -Pandroid.injected.signing.store.file=$KEY_STORE_PATH \
+            -Pandroid.injected.signing.store.password=$KEY_STORE_PASS \
+            -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
+            -Pandroid.injected.signing.key.password=$KEY_PASS
+
+      - name: Rename APK
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk \
+             dist/CS3-Extension-Builder.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CS3-Extension-Builder-${{ github.run_number }}
+          path: dist/CS3-Extension-Builder.apk
+          retention-days: 30
+
+      - name: Update rolling "latest" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "Latest Build (v${{ env.VERSION_NAME }})"
+          prerelease: true
+          files: dist/CS3-Extension-Builder.apk
+          body: |
+            ⚡ **Rolling build** from `${{ github.ref_name }}` @ `${{ github.sha }}`
+
+            This release is automatically updated on every push. For stable versioned releases, see the tagged releases below.
+
+            **Version:** ${{ env.VERSION_NAME }} (build ${{ env.VERSION_CODE }})
+            **Commit:** ${{ github.sha }}
+            **Run:** #${{ github.run_number }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

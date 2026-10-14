@@ -1,6 +1,14 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+}
+
+// Read version from version.properties
+val versionProps = Properties().apply {
+    val propsFile = rootProject.file("version.properties")
+    if (propsFile.exists()) load(propsFile.inputStream())
 }
 
 android {
@@ -11,8 +19,8 @@ android {
         applicationId = "com.khalsatorrent.cs3builder"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = versionProps.getProperty("android.versionCode", "1").trim().toInt()
+        versionName = versionProps.getProperty("android.versionName", "1.0.0").trim()
     }
 
     buildTypes {
