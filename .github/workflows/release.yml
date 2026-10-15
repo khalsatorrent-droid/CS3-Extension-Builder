@@ -14,6 +14,9 @@ on:
           - major
           - none
 
+permissions:
+  contents: write
+
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   # 1. Prepare: bump version, update CHANGELOG, commit, tag
@@ -52,8 +55,12 @@ jobs:
       - name: Commit version bump
         run: |
           git add version.properties CHANGELOG.md
-          git commit -m "chore: bump version to ${{ steps.bump.outputs.VERSION_NAME }}"
-          git push origin HEAD
+          if git diff --cached --quiet; then
+            echo "Nothing to commit (bump=none), skipping."
+          else
+            git commit -m "chore: bump version to ${{ steps.bump.outputs.VERSION_NAME }}"
+            git push origin HEAD
+          fi
 
       - name: Create tag
         run: |
