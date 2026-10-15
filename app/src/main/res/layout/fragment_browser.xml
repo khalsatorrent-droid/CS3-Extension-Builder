@@ -66,6 +66,6 @@
         android:layout_gravity="bottom|end"
         android:layout_margin="16dp"
         android:contentDescription="@string/fab_clear_logs"
-        app:srcCompat="@android:drawable/ic_menu_delete" />
+        app:srcCompat="@drawable/ic_delete" />
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
