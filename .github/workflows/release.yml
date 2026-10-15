@@ -112,12 +112,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build release APK
-        run: |
-          ./gradlew assembleRelease --no-daemon --stacktrace \
-            -Pandroid.injected.signing.store.file=$KEY_STORE_PATH \
-            -Pandroid.injected.signing.store.password=$KEY_STORE_PASS \
-            -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
-            -Pandroid.injected.signing.key.password=$KEY_PASS
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: Rename & stage APK
         run: |
