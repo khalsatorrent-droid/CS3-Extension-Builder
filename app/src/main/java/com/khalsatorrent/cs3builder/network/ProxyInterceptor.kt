@@ -4,6 +4,7 @@ import androidx.lifecycle.MutableLiveData
 import com.khalsatorrent.cs3builder.model.NetworkLog
 import okhttp3.Interceptor
 import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.Buffer
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
@@ -55,7 +56,7 @@ class ProxyInterceptor : Interceptor {
                 "[Binary content, ${bodyBytes.size} bytes]"
             }
             newResponse = response.newBuilder()
-                .body(okhttp3.ResponseBody.create(responseBodySource.contentType(), bodyBytes))
+                .body(bodyBytes.toResponseBody(responseBodySource.contentType()))
                 .build()
         } else {
             responseBodyText = null
