@@ -56,7 +56,16 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/gradle-build.log; exit ${PIPESTATUS[0]}
+        run: |
+          set -o pipefail
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/gradle-build.log
+
+      - name: Print build log tail on failure
+        if: failure()
+        run: |
+          echo "====== GRADLE BUILD LOG (last 200 lines) ======"
+          tail -200 /tmp/gradle-build.log || true
+          echo "====== END OF LOG ======"
 
       - name: Upload build log on failure
         if: failure()
