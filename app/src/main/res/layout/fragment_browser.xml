@@ -35,7 +35,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:layout_marginEnd="8dp"
+                android:layout_marginEnd="6dp"
                 android:hint="@string/hint_enter_url"
                 android:inputType="textUri"
                 android:imeOptions="actionGo"
@@ -47,6 +47,17 @@
                 android:paddingTop="8dp"
                 android:paddingBottom="8dp" />
 
+            <!-- Ad Block toggle -->
+            <ImageButton
+                android:id="@+id/btnAdBlock"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Block ads/redirects"
+                android:src="@drawable/ic_block"
+                android:tint="?attr/colorOnSurfaceVariant"
+                android:layout_marginEnd="2dp" />
+
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnGo"
                 android:layout_width="wrap_content"
@@ -56,6 +67,21 @@
                 style="@style/Widget.Material3.Button" />
 
         </LinearLayout>
+
+        <!-- Ad block status chip (shown when enabled) -->
+        <com.google.android.material.chip.Chip
+            android:id="@+id/chipAdBlock"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:layout_marginBottom="4dp"
+            android:text="🛡 Ad/Redirect Block ON"
+            android:textSize="11sp"
+            android:visibility="gone"
+            app:chipBackgroundColor="#CC22AA44"
+            app:closeIconVisible="true"
+            app:closeIconTint="@android:color/white"
+            android:textColor="@android:color/white" />
 
         <!-- Progress bar -->
         <ProgressBar

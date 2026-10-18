@@ -25,4 +25,13 @@
     <string name="btn_copy">Copy</string>
     <string name="btn_share_file">Share .kt</string>
     <string name="btn_share_claude">Share with Claude</string>
+
+    <!-- Log sharing -->
+    <string name="btn_share_logs">Share Logs</string>
+    <string name="btn_export_logs">Save .txt</string>
+    <string name="btn_generate_share">→ Claude</string>
+
+    <!-- Ad blocker -->
+    <string name="btn_ad_block">Block Ads</string>
+    <string name="chip_ad_block">🛡 Ad/Redirect Block ON</string>
 </resources>

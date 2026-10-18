@@ -13,7 +13,8 @@ import java.util.UUID
 
 class LoggingWebViewClient(
     private val onPageStartedCallback: ((url: String) -> Unit)? = null,
-    private val onPageFinishedCallback: ((url: String) -> Unit)? = null
+    private val onPageFinishedCallback: ((url: String) -> Unit)? = null,
+    private val shouldBlockUrl: ((url: String) -> Boolean)? = null
 ) : WebViewClient() {
 
     private val gson = Gson()
@@ -23,13 +24,20 @@ class LoggingWebViewClient(
         request: WebResourceRequest?
     ): WebResourceResponse? {
         request?.let {
+            val url = it.url.toString()
+
+            // Block ad/redirect domains if blocker is active
+            if (shouldBlockUrl?.invoke(url) == true) {
+                return WebResourceResponse("text/plain", "utf-8", null)
+            }
+
             val headers = it.requestHeaders?.toMutableMap() ?: mutableMapOf()
             val isXHR = headers["X-Requested-With"]?.contains("XMLHttpRequest", true) == true
             val log = NetworkLog(
                 id = UUID.randomUUID().toString(),
                 timestamp = System.currentTimeMillis(),
                 method = it.method ?: "GET",
-                url = it.url.toString(),
+                url = url,
                 requestHeaders = headers,
                 requestBody = null,
                 responseCode = 0,         // not available from WebView intercept
