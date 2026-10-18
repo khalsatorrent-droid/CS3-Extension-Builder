@@ -8,20 +8,25 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
 
-    <!-- App specific -->
+    <!-- Method colors -->
     <color name="method_get">#2E7D32</color>
     <color name="method_post">#E65100</color>
     <color name="method_put">#1565C0</color>
     <color name="method_delete">#B71C1C</color>
+    <color name="method_patch">#6A1B9A</color>
     <color name="method_other">#546E7A</color>
 
+    <!-- Status colors -->
     <color name="status_2xx">#2E7D32</color>
     <color name="status_3xx">#1565C0</color>
     <color name="status_4xx">#E65100</color>
     <color name="status_5xx">#B71C1C</color>
 
+    <!-- Code view -->
     <color name="code_background">#FF1E1E1E</color>
     <color name="code_text">#FFD4D4D4</color>
 
+    <!-- App -->
     <color name="seed">#6650A4</color>
+    <color name="capture_bar_bg">#1E7D32</color>
 </resources>

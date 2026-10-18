@@ -16,13 +16,16 @@ data class CS3Template(
 data class DetectedPattern(
     val type: PatternType,
     val url: String,
-    val description: String
+    val description: String,
+    val method: String = "GET",
+    val responseCode: Int = 0,
+    val responseBody: String? = null
 )
 
 enum class PatternType {
     SEARCH_ENDPOINT,
+    EPISODE_API,
     MEDIA_URL,
     API_ENDPOINT,
-    DETAIL_PAGE,
     STREAMING_URL
 }

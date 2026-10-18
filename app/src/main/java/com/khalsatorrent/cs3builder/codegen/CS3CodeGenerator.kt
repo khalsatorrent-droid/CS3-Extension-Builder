@@ -12,58 +12,57 @@ import java.util.Locale
 object CS3CodeGenerator {
 
     private val STREAMING_EXTENSIONS = listOf(".m3u8", ".mp4", ".mkv", ".ts", ".webm", ".m4v")
-    private val STREAMING_PATTERNS = listOf("manifest", "playlist", "stream", "hls", "dash", "video", "media")
-    private val SEARCH_PATTERNS = listOf("search", "query", "q=", "keyword", "find", "lookup")
-    private val JSON_MIME_TYPES = listOf("application/json", "text/json")
-    private val HTML_MIME_TYPES = listOf("text/html", "application/xhtml")
-    private val SKIP_EXTENSIONS = listOf(".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".woff", ".woff2", ".css", ".js")
-    private val SKIP_DOMAINS = listOf("google-analytics", "googletagmanager", "doubleclick", "facebook.com", "twitter.com",
-        "googleapis.com/maps", "recaptcha", "cloudflare.com/cdn-cgi")
+    private val SEARCH_PATTERNS = listOf("search", "query", "q=", "keyword", "find", "suggest", "autocomplete")
+    private val EPISODE_PATTERNS = listOf("episode", "ep=", "/ep/", "watch", "player", "embed", "stream")
+    private val JSON_MIME = listOf("application/json", "text/json")
+    private val SKIP_EXTENSIONS = listOf(".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg",
+        ".woff", ".woff2", ".css", ".js", ".webp", ".map")
+    private val SKIP_DOMAINS = listOf("google-analytics", "googletagmanager", "doubleclick",
+        "facebook.com", "twitter.com", "googleapis.com/maps", "recaptcha", "cloudflare.com/cdn-cgi",
+        "gstatic.com", "googleapis.com/ajax", "disqus.com", "hotjar.com", "clarity.ms")
 
     fun generate(logs: List<NetworkLog>): CS3Template {
-        val filteredLogs = logs.filter { log ->
-            SKIP_EXTENSIONS.none { log.url.contains(it, ignoreCase = true) } &&
+        val filtered = logs.filter { log ->
+            SKIP_EXTENSIONS.none { log.url.substringBefore("?").endsWith(it, ignoreCase = true) } &&
             SKIP_DOMAINS.none { log.url.contains(it, ignoreCase = true) }
         }
 
-        val baseUrl = detectBaseUrl(filteredLogs)
+        val baseUrl = detectBaseUrl(filtered)
         val providerName = deriveProviderName(baseUrl)
-        val patterns = detectPatterns(filteredLogs)
-        val commonHeaders = extractCommonHeaders(filteredLogs)
-        val allCookies = extractAllCookies(logs)
+        val patterns = detectPatterns(filtered)
+        val commonHeaders = extractCommonHeaders(filtered, baseUrl)
+        val allCookies = extractAllCookies(logs, baseUrl)
 
         val searchPattern = patterns.firstOrNull { it.type == PatternType.SEARCH_ENDPOINT }
-        val mediaUrls = patterns.filter { it.type == PatternType.MEDIA_URL || it.type == PatternType.STREAMING_URL }
-            .map { it.url }.distinct()
-        val apiEndpoints = patterns.filter { it.type == PatternType.API_ENDPOINT }
-            .map { it.url }.distinct()
-
-        val searchEndpoint = searchPattern?.url
-        val searchQueryParam = searchPattern?.let { extractQueryParam(it.url) }
+        val episodeApiPattern = patterns.firstOrNull { it.type == PatternType.EPISODE_API }
+        val streamingUrls = patterns.filter { it.type == PatternType.STREAMING_URL }.map { it.url }.distinct()
+        val mediaUrls = patterns.filter { it.type == PatternType.MEDIA_URL }.map { it.url }.distinct()
+        val apiEndpoints = patterns.filter { it.type == PatternType.API_ENDPOINT }.map { it.url }.distinct()
 
         val code = buildGeneratedCode(
             baseUrl = baseUrl,
             providerName = providerName,
             commonHeaders = commonHeaders,
             allCookies = allCookies,
-            searchEndpoint = searchEndpoint,
-            searchQueryParam = searchQueryParam,
+            searchPattern = searchPattern,
+            episodeApiPattern = episodeApiPattern,
+            streamingUrls = streamingUrls,
             mediaUrls = mediaUrls,
             apiEndpoints = apiEndpoints,
             patterns = patterns,
-            logs = filteredLogs
+            logs = filtered
         )
 
-        val summary = buildLogSummary(logs, filteredLogs, baseUrl, patterns, commonHeaders, allCookies)
+        val summary = buildLogSummary(logs, filtered, baseUrl, patterns, commonHeaders, allCookies)
 
         return CS3Template(
             baseUrl = baseUrl,
             providerName = providerName,
             detectedHeaders = commonHeaders,
             detectedCookies = allCookies,
-            searchEndpoint = searchEndpoint,
-            searchQueryParam = searchQueryParam,
-            mediaUrls = mediaUrls,
+            searchEndpoint = searchPattern?.url,
+            searchQueryParam = searchPattern?.let { extractQueryParam(it.url) },
+            mediaUrls = (streamingUrls + mediaUrls).distinct(),
             apiEndpoints = apiEndpoints,
             generatedCode = code,
             logSummary = summary
@@ -72,18 +71,15 @@ object CS3CodeGenerator {
 
     private fun detectBaseUrl(logs: List<NetworkLog>): String {
         if (logs.isEmpty()) return "https://example.com"
-
-        val originCounts = mutableMapOf<String, Int>()
+        val counts = mutableMapOf<String, Int>()
         for (log in logs) {
             try {
                 val uri = URI(log.url)
                 val origin = "${uri.scheme}://${uri.host}"
-                originCounts[origin] = (originCounts[origin] ?: 0) + 1
-            } catch (e: Exception) {
-                // skip malformed URLs
-            }
+                counts[origin] = (counts[origin] ?: 0) + 1
+            } catch (_: Exception) {}
         }
-        return originCounts.maxByOrNull { it.value }?.key ?: "https://example.com"
+        return counts.maxByOrNull { it.value }?.key ?: "https://example.com"
     }
 
     private fun deriveProviderName(baseUrl: String): String {
@@ -92,92 +88,111 @@ object CS3CodeGenerator {
             val parts = host.removePrefix("www.").split(".")
             val name = parts.firstOrNull() ?: "GeneratedProvider"
             name.replaceFirstChar { it.uppercase() }
-                .replace("-", "")
-                .replace("_", "")
-                .let { if (it.first().isDigit()) "Provider$it" else it }
-        } catch (e: Exception) {
-            "GeneratedProvider"
-        }
+                .replace(Regex("[^a-zA-Z0-9]"), "")
+                .let { if (it.firstOrNull()?.isDigit() == true) "Provider$it" else it }
+        } catch (_: Exception) { "GeneratedProvider" }
     }
 
     private fun detectPatterns(logs: List<NetworkLog>): List<DetectedPattern> {
         val patterns = mutableListOf<DetectedPattern>()
+        val seen = mutableSetOf<String>()
 
         for (log in logs) {
-            val url = log.url.lowercase()
+            val url = log.url
+            val urlLower = url.lowercase()
+            val key = urlLower.substringBefore("?")
+            if (!seen.add(key)) continue
 
-            // Streaming URLs
-            if (STREAMING_EXTENSIONS.any { url.contains(it) } ||
-                STREAMING_PATTERNS.any { url.contains(it) && (url.contains(".m3u8") || url.contains(".mp4") || url.contains("stream")) }) {
+            // Streaming URLs — highest priority
+            if (STREAMING_EXTENSIONS.any { urlLower.substringBefore("?").endsWith(it) }) {
                 patterns.add(DetectedPattern(
-                    type = if (url.contains(".m3u8")) PatternType.STREAMING_URL else PatternType.MEDIA_URL,
-                    url = log.url,
-                    description = "Detected streaming/media URL"
+                    type = if (urlLower.contains(".m3u8")) PatternType.STREAMING_URL else PatternType.MEDIA_URL,
+                    url = url,
+                    description = "Stream/media URL",
+                    method = log.method,
+                    responseCode = log.responseCode
+                ))
+                continue
+            }
+
+            // Episode/player embed APIs
+            if (EPISODE_PATTERNS.any { urlLower.contains(it) } && (log.isXHR || JSON_MIME.any { log.mimeType?.contains(it) == true })) {
+                patterns.add(DetectedPattern(
+                    type = PatternType.EPISODE_API,
+                    url = url,
+                    description = "Episode/player API endpoint",
+                    method = log.method,
+                    responseCode = log.responseCode,
+                    responseBody = log.responseBody?.take(500)
                 ))
                 continue
             }
 
             // Search endpoints
-            if (SEARCH_PATTERNS.any { url.contains(it) }) {
+            if (SEARCH_PATTERNS.any { urlLower.contains(it) }) {
                 patterns.add(DetectedPattern(
                     type = PatternType.SEARCH_ENDPOINT,
-                    url = log.url,
-                    description = "Detected search endpoint"
+                    url = url,
+                    description = "Search endpoint",
+                    method = log.method,
+                    responseCode = log.responseCode
                 ))
                 continue
             }
 
             // JSON API endpoints
-            val mime = log.mimeType?.lowercase() ?: ""
-            if (JSON_MIME_TYPES.any { mime.contains(it) } || log.isXHR) {
+            val isJson = JSON_MIME.any { log.mimeType?.contains(it) == true } ||
+                log.requestHeaders["Accept"]?.contains("application/json") == true
+            if (log.isXHR || isJson) {
                 patterns.add(DetectedPattern(
                     type = PatternType.API_ENDPOINT,
-                    url = log.url,
-                    description = "JSON/API endpoint"
+                    url = url,
+                    description = "JSON/API endpoint",
+                    method = log.method,
+                    responseCode = log.responseCode,
+                    responseBody = log.responseBody?.take(300)
                 ))
-                continue
-            }
-
-            // HTML detail pages
-            if (HTML_MIME_TYPES.any { mime.contains(it) } && log.responseCode == 200) {
-                val body = log.responseBody?.lowercase() ?: ""
-                if (body.contains("video") || body.contains("episode") || body.contains("season") ||
-                    body.contains("watch") || body.contains("player")) {
-                    patterns.add(DetectedPattern(
-                        type = PatternType.DETAIL_PAGE,
-                        url = log.url,
-                        description = "Possible media detail page"
-                    ))
-                }
             }
         }
-
         return patterns
     }
 
-    private fun extractCommonHeaders(logs: List<NetworkLog>): Map<String, String> {
-        val headerFrequency = mutableMapOf<String, MutableMap<String, Int>>()
-        for (log in logs) {
+    private fun extractCommonHeaders(logs: List<NetworkLog>, baseUrl: String): Map<String, String> {
+        // Only include headers from requests to the main domain
+        val mainHost = try { URI(baseUrl).host } catch (_: Exception) { "" }
+        val relevant = logs.filter {
+            try { URI(it.url).host?.contains(mainHost ?: "") == true } catch (_: Exception) { false }
+        }
+
+        val frequency = mutableMapOf<String, MutableMap<String, Int>>()
+        val importantHeaders = setOf("user-agent", "accept", "accept-language", "referer",
+            "origin", "x-requested-with", "authorization", "x-api-key", "x-auth-token")
+
+        for (log in relevant) {
             for ((k, v) in log.requestHeaders) {
-                val lower = k.lowercase()
-                if (lower in listOf("user-agent", "accept", "accept-language", "referer", "origin",
-                        "x-requested-with", "authorization", "content-type")) {
-                    val valueMap = headerFrequency.getOrPut(k) { mutableMapOf() }
-                    valueMap[v] = (valueMap[v] ?: 0) + 1
+                if (k.lowercase() in importantHeaders) {
+                    val map = frequency.getOrPut(k) { mutableMapOf() }
+                    map[v] = (map[v] ?: 0) + 1
                 }
             }
         }
 
-        val result = mutableMapOf<String, String>()
-        for ((header, valueMap) in headerFrequency) {
-            val mostCommon = valueMap.maxByOrNull { it.value }?.key
-            if (mostCommon != null) result[header] = mostCommon
-        }
-        return result
+        return frequency.mapNotNull { (header, values) ->
+            val best = values.maxByOrNull { it.value }?.key ?: return@mapNotNull null
+            header to best
+        }.toMap()
     }
 
-    private fun extractAllCookies(logs: List<NetworkLog>): List<String> {
-        return logs.flatMap { it.cookies }.distinct()
+    private fun extractAllCookies(logs: List<NetworkLog>, baseUrl: String): List<String> {
+        val mainHost = try { URI(baseUrl).host?.removePrefix("www.") } catch (_: Exception) { "" }
+        return logs
+            .filter { log ->
+                try { URI(log.url).host?.contains(mainHost ?: "") == true } catch (_: Exception) { false }
+            }
+            .flatMap { it.cookies }
+            .map { it.substringBefore(";").trim() }  // just name=value
+            .filter { it.isNotBlank() && it.contains("=") }
+            .distinct()
     }
 
     private fun extractQueryParam(url: String): String? {
@@ -186,15 +201,11 @@ object CS3CodeGenerator {
             val params = query.split("&")
             SEARCH_PATTERNS.forEach { pattern ->
                 params.forEach { param ->
-                    if (param.lowercase().startsWith(pattern)) {
-                        return param.substringBefore("=")
-                    }
+                    if (param.lowercase().startsWith(pattern)) return param.substringBefore("=")
                 }
             }
             params.firstOrNull()?.substringBefore("=")
-        } catch (e: Exception) {
-            null
-        }
+        } catch (_: Exception) { null }
     }
 
     private fun buildGeneratedCode(
@@ -202,8 +213,9 @@ object CS3CodeGenerator {
         providerName: String,
         commonHeaders: Map<String, String>,
         allCookies: List<String>,
-        searchEndpoint: String?,
-        searchQueryParam: String?,
+        searchPattern: DetectedPattern?,
+        episodeApiPattern: DetectedPattern?,
+        streamingUrls: List<String>,
         mediaUrls: List<String>,
         apiEndpoints: List<String>,
         patterns: List<DetectedPattern>,
@@ -211,122 +223,169 @@ object CS3CodeGenerator {
     ): String {
         val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
 
-        val headersComment = if (commonHeaders.isNotEmpty()) {
-            commonHeaders.entries.joinToString("\n") { (k, v) -> "    //   $k: $v" }
-        } else {
-            "    //   (no common headers detected)"
-        }
+        // Build defaultHeaders map
+        val headersMap = commonHeaders
+            .filter { it.key.lowercase() !in listOf("host", "content-length", "content-type") }
+            .entries.take(6)
+            .joinToString(",\n        ") { (k, v) ->
+                "\"$k\" to \"${v.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+            }
 
-        val cookiesComment = if (allCookies.isNotEmpty()) {
-            allCookies.take(10).joinToString("\n") { "    //   $it" }
-        } else {
-            "    //   (no cookies detected)"
-        }
+        val cookieLine = if (allCookies.isNotEmpty()) {
+            val cookieStr = allCookies.take(5).joinToString("; ")
+            ",\n        \"Cookie\" to \"$cookieStr\""
+        } else ""
 
-        val headersMapEntries = commonHeaders.entries
-            .filter { it.key.lowercase() !in listOf("host", "content-length") }
-            .take(8)
-            .joinToString(",\n        ") { (k, v) -> "\"$k\" to \"${v.replace("\"", "\\\"")}\"" }
+        // Search impl
+        val searchImpl = if (searchPattern != null) {
+            val param = extractQueryParam(searchPattern.url) ?: "q"
+            val cleanEndpoint = searchPattern.url.substringBefore("?")
+            val isJson = JSON_MIME.any { searchPattern.url.contains("json") } ||
+                logs.find { it.url == searchPattern.url }?.mimeType?.contains("json") == true
 
-        val searchImpl = if (searchEndpoint != null) {
-            val param = searchQueryParam ?: "q"
-            val cleanEndpoint = searchEndpoint.substringBefore("?")
-            """        val url = "$cleanEndpoint?$param=\${query.encodeURL()}"
-        val doc = app.get(url, headers = defaultHeaders).document
-        return doc.select("a.result-item, .search-result, article").mapNotNull { el ->
-            val href = el.attr("abs:href")
-            val title = el.select("h2, h3, .title").text()
-            if (href.isBlank() || title.isBlank()) return@mapNotNull null
-            newAnimeSearchResponse(title, href, TvType.Movie)
-        }"""
-        } else {
-            "        // TODO: No search endpoint detected — implement manually\n        return listOf()"
-        }
-
-        val detailImpl = run {
-            val detailPage = patterns.firstOrNull { it.type == PatternType.DETAIL_PAGE }
-            if (detailPage != null) {
-                """        val doc = app.get(url, headers = defaultHeaders).document
-        val title = doc.select("h1, .title, .movie-title").firstOrNull()?.text() ?: "Unknown"
-        val posterUrl = doc.select("img.poster, .thumbnail img, .cover img").firstOrNull()?.attr("abs:src")
-        val description = doc.select(".description, .synopsis, p.overview").firstOrNull()?.text()
-        // TODO: Adjust selectors based on actual page structure
-        return newMovieLoadResponse(title, url, TvType.Movie, url) {
-            this.posterUrl = posterUrl
-            this.plot = description
-        }"""
+            if (isJson) {
+                """        val url = "$cleanEndpoint?$param=\${query.encodeURL()}"
+        val response = app.get(url, headers = defaultHeaders).parsedSafe<SearchResponse>()
+        // TODO: adjust based on actual JSON structure from captured response
+        return response?.results?.mapNotNull { item ->
+            val title = item.title ?: item.name ?: return@mapNotNull null
+            val href = fixUrl(item.url ?: item.link ?: return@mapNotNull null)
+            newMovieSearchResponse(title, href, TvType.Movie) {
+                this.posterUrl = item.poster ?: item.image
+            }
+        } ?: emptyList()"""
             } else {
-                "        val doc = app.get(url, headers = defaultHeaders).document\n        val title = doc.select(\"h1\").firstOrNull()?.text() ?: \"Unknown\"\n        // TODO: Implement load() based on observed page structure\n        return newMovieLoadResponse(title, url, TvType.Movie, url)"
+                """        val url = "$cleanEndpoint?$param=\${query.encodeURL()}"
+        val doc = app.get(url, headers = defaultHeaders).document
+        // TODO: adjust CSS selectors for actual page structure
+        return doc.select("a.result-item, .search-result, article, .item").mapNotNull { el ->
+            val href = el.attr("abs:href").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val title = el.select("h2, h3, .title, [class*=title]").text().trim()
+                .takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val poster = el.select("img").firstOrNull()?.attr("abs:src")
+            newMovieSearchResponse(title, href, TvType.Movie) {
+                this.posterUrl = poster
+            }
+        }"""
+            }
+        } else {
+            """        // TODO: No search endpoint detected — browse to a search results page first
+        val url = "\$mainUrl/search?q=\${query.encodeURL()}"
+        val doc = app.get(url, headers = defaultHeaders).document
+        return doc.select("article, .item, .result").mapNotNull { el ->
+            val href = el.attr("abs:href").takeIf { it.isNotBlank() }
+                ?: el.selectFirst("a")?.attr("abs:href") ?: return@mapNotNull null
+            val title = el.selectFirst("h2, h3, .title")?.text()?.trim() ?: return@mapNotNull null
+            newMovieSearchResponse(title, href, TvType.Movie)
+        }"""
+        }
+
+        // loadLinks impl
+        val allStreams = streamingUrls + mediaUrls
+        val loadLinksImpl = when {
+            episodeApiPattern != null -> {
+                val apiUrl = episodeApiPattern.url.substringBefore("?")
+                """        // Detected episode API: $apiUrl
+        // TODO: parse the `data` URL to extract episode ID, then call the API
+        val doc = app.get(data, headers = defaultHeaders).document
+        val episodeId = doc.select("[data-id], [data-episode-id], #episode-id")
+            .firstOrNull()?.attr("data-id")
+            ?: Regex("""id\s*[:=]\s*["']?(\w+)""").find(doc.html())?.groupValues?.get(1)
+        if (episodeId != null) {
+            val apiResponse = app.get("$apiUrl/\$episodeId", headers = defaultHeaders)
+                .parsedSafe<EpisodeResponse>()
+            apiResponse?.sources?.forEach { source ->
+                callback(ExtractorLink(
+                    source = name,
+                    name = "\$name - \${source.label ?: "Auto"}",
+                    url = source.url ?: return@forEach,
+                    referer = data,
+                    quality = getQualityFromName(source.label),
+                    isM3u8 = source.url.contains(".m3u8")
+                ))
+            }
+            return apiResponse?.sources?.isNotEmpty() == true
+        }
+        return false"""
+            }
+            allStreams.isNotEmpty() -> {
+                val streamNote = allStreams.take(3).joinToString("\n") { "        //   $it" }
+                """        // Detected stream URLs (use as pattern reference):
+$streamNote
+        val doc = app.get(data, headers = defaultHeaders).document
+
+        // Try embedded sources
+        val streamUrl = doc.select("source[src], video[src]").firstOrNull()?.attr("abs:src")
+            ?: extractStreamFromScripts(doc)
+            ?: extractFromIframe(doc, data)
+
+        if (streamUrl != null) {
+            callback(ExtractorLink(
+                source = name,
+                name = name,
+                url = streamUrl,
+                referer = data,
+                quality = Qualities.Unknown.value,
+                isM3u8 = streamUrl.contains(".m3u8")
+            ))
+            return true
+        }
+
+        // Try embed extractors
+        doc.select("iframe[src]").forEach { iframe ->
+            val iframeSrc = iframe.attr("abs:src")
+            if (iframeSrc.isNotBlank()) {
+                loadExtractor(iframeSrc, data, subtitleCallback, callback)
+            }
+        }
+        return false"""
+            }
+            else -> {
+                """        // TODO: No stream URLs detected — browse to a video player page first
+        val doc = app.get(data, headers = defaultHeaders).document
+        val streamUrl = extractStreamFromScripts(doc)
+            ?: doc.select("source[src]").firstOrNull()?.attr("abs:src")
+        if (streamUrl != null) {
+            callback(ExtractorLink(
+                source = name, name = name, url = streamUrl,
+                referer = data, quality = Qualities.Unknown.value,
+                isM3u8 = streamUrl.contains(".m3u8")
+            ))
+            return streamUrl.isNotBlank()
+        }
+        return false"""
             }
         }
 
-        val loadLinksImpl = if (mediaUrls.isNotEmpty()) {
-            val detected = mediaUrls.take(5).joinToString("\n") { "            //   $it" }
-            """        // Detected media URLs from captured traffic:
-$detected
-        // TODO: Parse page at `data` to extract actual stream URL dynamically
-        val doc = app.get(data, headers = defaultHeaders).document
-        val streamUrl = doc.select("source[src], video[src]").firstOrNull()?.attr("abs:src")
-            ?: extractFromScripts(doc)
-        if (streamUrl != null) {
-            callback(
-                ExtractorLink(
-                    source = name,
-                    name = name,
-                    url = streamUrl,
-                    referer = data,
-                    quality = Qualities.Unknown.value,
-                    isM3u8 = streamUrl.contains(".m3u8")
-                )
-            )
-            return true
-        }
-        return false"""
-        } else {
-            "        // TODO: No media URLs detected — browse to a media page first\n        return false"
-        }
-
-        val cookieHeader = if (allCookies.isNotEmpty()) {
-            val cookieStr = allCookies.take(5)
-                .map { it.substringBefore(";").trim() }
-                .joinToString("; ")
-            "\n        \"Cookie\" to \"$cookieStr\","
+        // API endpoints comment
+        val apiComment = if (apiEndpoints.isNotEmpty()) {
+            "\n    // Detected API endpoints:\n" + apiEndpoints.take(8).joinToString("\n") { "    //   $it" } + "\n"
         } else ""
 
-        val apiEndpointsComment = if (apiEndpoints.isNotEmpty()) {
-            "\n    // Detected API endpoints:\n" + apiEndpoints.take(10).joinToString("\n") { "    //   $it" }
-        } else ""
+        return """// Auto-generated by CS3 Extension Builder — $dateStr
+// Site: $baseUrl
+// ⚠ This is a starting point — review selectors/URLs before using.
 
-        return """// Auto-generated by CS3 Extension Builder on $dateStr
-// Base URL: $baseUrl
-// NOTE: This is a starting point. Review and fix before using.
-//       The generated selectors and URLs may need manual adjustment.
-
-package com.example
+package com.example.${providerName.lowercase()}
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.utils.AppUtils.parseJson
+import com.lagradost.cloudstream3.utils.AppUtils.parsedSafe
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 
 class ${providerName}Provider : MainAPI() {
     override var mainUrl = "$baseUrl"
     override var name = "$providerName"
-    override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
+    override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
     override var lang = "en"
     override val hasMainPage = true
     override val hasSearch = true
-
-    // Auto-detected headers from captured traffic:
-$headersComment
-
-    // Detected cookies:
-$cookiesComment
-$apiEndpointsComment
-
+    override val hasDownloadSupport = true
+$apiComment
+    // Auto-detected request headers
     private val defaultHeaders = mapOf(
-        $headersMapEntries$cookieHeader
+        $headersMap$cookieLine
     )
 
     override suspend fun getMainPage(
@@ -334,16 +393,8 @@ $apiEndpointsComment
         request: MainPageRequest
     ): HomePageResponse {
         val doc = app.get(mainUrl, headers = defaultHeaders).document
-        // TODO: Adjust selectors for actual homepage structure
-        val items = doc.select(".movie-item, .content-item, article").mapNotNull { el ->
-            val href = el.attr("abs:href").takeIf { it.isNotBlank() }
-                ?: el.select("a").firstOrNull()?.attr("abs:href") ?: return@mapNotNull null
-            val title = el.select("h2, h3, .title").text().takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            val poster = el.select("img").firstOrNull()?.attr("abs:src")
-            newAnimeSearchResponse(title, href, TvType.Movie) {
-                this.posterUrl = poster
-            }
-        }
+        // TODO: adjust selectors for actual homepage layout
+        val items = doc.select(".movie-item, .content-item, article, .item").mapNotNull { it.toSearchResult() }
         return newHomePageResponse(request.name, items)
     }
 
@@ -352,7 +403,40 @@ $searchImpl
     }
 
     override suspend fun load(url: String): LoadResponse? {
-$detailImpl
+        val doc = app.get(url, headers = defaultHeaders).document
+        val title = doc.selectFirst("h1, h2.title, .movie-title, [itemprop=name]")
+            ?.text()?.trim() ?: return null
+        val poster = doc.selectFirst("img.poster, .thumbnail img, [itemprop=image], .cover img")
+            ?.let { it.attr("data-src").ifBlank { it.attr("abs:src") } }
+        val description = doc.selectFirst(".description, .synopsis, p.overview, [itemprop=description]")
+            ?.text()
+        val tags = doc.select("a[href*=genre], a[href*=category], .genres a").map { it.text() }
+        val year = doc.selectFirst(".year, [itemprop=dateCreated]")?.text()
+            ?.filter { it.isDigit() }?.take(4)?.toIntOrNull()
+
+        // Detect if it's a TV series (has episodes)
+        val episodeLinks = doc.select("a[href*=episode], a[href*=/ep-], .episodes a")
+        return if (episodeLinks.isNotEmpty()) {
+            val episodes = episodeLinks.mapIndexed { i, el ->
+                newEpisode(el.attr("abs:href")) {
+                    this.name = el.text().trim().ifBlank { "Episode \${i + 1}" }
+                    this.episode = el.attr("data-num").toIntOrNull() ?: (i + 1)
+                }
+            }
+            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+                this.posterUrl = poster
+                this.plot = description
+                this.tags = tags
+                this.year = year
+            }
+        } else {
+            newMovieLoadResponse(title, url, TvType.Movie, url) {
+                this.posterUrl = poster
+                this.plot = description
+                this.tags = tags
+                this.year = year
+            }
+        }
     }
 
     override suspend fun loadLinks(
@@ -364,106 +448,113 @@ $detailImpl
 $loadLinksImpl
     }
 
-    private fun extractFromScripts(doc: Document): String? {
-        // Attempt to extract stream URL embedded in JavaScript
-        val scripts = doc.select("script").map { it.html() }
+    // --- helpers ---
+
+    private fun Element.toSearchResult(): SearchResponse? {
+        val href = attr("abs:href").takeIf { it.isNotBlank() }
+            ?: selectFirst("a")?.attr("abs:href") ?: return null
+        val title = selectFirst("h2, h3, .title, [class*=title]")?.text()?.trim()
+            ?: selectFirst("a")?.text()?.trim() ?: return null
+        val poster = selectFirst("img")?.let { it.attr("data-src").ifBlank { it.attr("abs:src") } }
+        return newMovieSearchResponse(title, href, TvType.Movie) {
+            this.posterUrl = poster
+        }
+    }
+
+    private fun extractStreamFromScripts(doc: Document): String? {
         val patterns = listOf(
             Regex(""""(https?://[^"]+\.m3u8[^"]*)""""),
             Regex(""""(https?://[^"]+\.mp4[^"]*)""""),
             Regex("""'(https?://[^']+\.m3u8[^']*)'"""),
-            Regex("""file:\s*["'](https?://[^"']+)["']"""),
-            Regex("""source:\s*["'](https?://[^"']+)["']""")
+            Regex("""file\s*:\s*["'](https?://[^"']+)["']"""),
+            Regex("""source\s*:\s*["'](https?://[^"']+)["']"""),
+            Regex("""src\s*:\s*["'](https?://[^"']+)["']"""),
+            Regex("""hls\s*:\s*["'](https?://[^"']+)["']""")
         )
-        for (script in scripts) {
+        for (script in doc.select("script").map { it.html() }) {
             for (pattern in patterns) {
-                val match = pattern.find(script)
-                if (match != null) return match.groupValues[1]
+                val match = pattern.find(script) ?: continue
+                val url = match.groupValues[1]
+                if (url.isNotBlank()) return url
             }
         }
         return null
     }
+
+    private suspend fun extractFromIframe(doc: Document, referer: String): String? {
+        val iframe = doc.selectFirst("iframe[src]") ?: return null
+        val src = iframe.attr("abs:src").takeIf { it.isNotBlank() } ?: return null
+        val iframeDoc = try { app.get(src, referer = referer, headers = defaultHeaders).document }
+            catch (_: Exception) { return null }
+        return extractStreamFromScripts(iframeDoc)
+    }
+
+    // Data classes for JSON API responses — adjust to match actual API
+    data class SearchResponse(val results: List<SearchItem>? = null, val data: List<SearchItem>? = null)
+    data class SearchItem(
+        val title: String? = null, val name: String? = null,
+        val url: String? = null, val link: String? = null,
+        val poster: String? = null, val image: String? = null
+    )
+    data class EpisodeResponse(val sources: List<StreamSource>? = null)
+    data class StreamSource(val url: String? = null, val label: String? = null, val type: String? = null)
 }
 """
     }
 
     private fun buildLogSummary(
         allLogs: List<NetworkLog>,
-        filteredLogs: List<NetworkLog>,
+        filtered: List<NetworkLog>,
         baseUrl: String,
         patterns: List<DetectedPattern>,
-        commonHeaders: Map<String, String>,
-        allCookies: List<String>
+        headers: Map<String, String>,
+        cookies: List<String>
     ): String {
-        val uniqueDomains = allLogs.mapNotNull { log ->
-            try { URI(log.url).host } catch (e: Exception) { null }
-        }.distinct()
-
+        val domains = allLogs.mapNotNull { try { URI(it.url).host } catch (_: Exception) { null } }.distinct()
         val methodCounts = allLogs.groupBy { it.method }.mapValues { it.value.size }
-        val responseCodes = allLogs.filter { it.responseCode > 0 }.groupBy { it.responseCode / 100 * 100 }
-            .mapValues { it.value.size }
+        val statusCounts = allLogs.filter { it.responseCode > 0 }.groupBy { it.responseCode / 100 * 100 }.mapValues { it.value.size }
 
-        val sb = StringBuilder()
-        sb.appendLine("=== CS3 Extension Builder — Capture Summary ===")
-        sb.appendLine()
-        sb.appendLine("Total requests captured : ${allLogs.size}")
-        sb.appendLine("After filtering         : ${filteredLogs.size}")
-        sb.appendLine("Unique domains          : ${uniqueDomains.size}")
-        sb.appendLine("Base URL detected       : $baseUrl")
-        sb.appendLine()
-        sb.appendLine("--- Request Methods ---")
-        methodCounts.entries.sortedByDescending { it.value }.forEach { (method, count) ->
-            sb.appendLine("  $method: $count")
+        return buildString {
+            appendLine("=== CS3 Extension Builder — Capture Summary ===")
+            appendLine()
+            appendLine("Total captured  : ${allLogs.size}")
+            appendLine("After filtering : ${filtered.size}")
+            appendLine("Unique domains  : ${domains.size}")
+            appendLine("Base URL        : $baseUrl")
+            appendLine()
+
+            appendLine("--- HTTP Methods ---")
+            methodCounts.entries.sortedByDescending { it.value }.forEach { (m, c) -> appendLine("  $m: $c") }
+            appendLine()
+
+            appendLine("--- Status Codes ---")
+            statusCounts.entries.sortedBy { it.key }.forEach { (b, c) -> appendLine("  ${b}xx: $c") }
+            appendLine()
+
+            appendLine("--- Detected Patterns ---")
+            for (type in PatternType.entries) {
+                val group = patterns.filter { it.type == type }
+                if (group.isEmpty()) continue
+                appendLine("  ${type.name} (${group.size}):")
+                group.take(4).forEach { appendLine("    [${it.method}] ${it.url.take(100)}") }
+            }
+            appendLine()
+
+            appendLine("--- Common Headers ---")
+            if (headers.isEmpty()) appendLine("  (none)")
+            else headers.forEach { (k, v) -> appendLine("  $k: ${v.take(80)}") }
+            appendLine()
+
+            appendLine("--- Cookies Set ---")
+            if (cookies.isEmpty()) appendLine("  (none)")
+            else {
+                cookies.take(15).forEach { appendLine("  ${it.take(100)}") }
+                if (cookies.size > 15) appendLine("  ... +${cookies.size - 15} more")
+            }
+            appendLine()
+
+            appendLine("--- All Domains ---")
+            domains.sorted().forEach { appendLine("  $it") }
         }
-        sb.appendLine()
-        sb.appendLine("--- Response Codes ---")
-        responseCodes.entries.sortedBy { it.key }.forEach { (base, count) ->
-            sb.appendLine("  ${base}xx: $count")
-        }
-        sb.appendLine()
-
-        val searchPatterns = patterns.filter { it.type == PatternType.SEARCH_ENDPOINT }
-        val streamingPatterns = patterns.filter { it.type == PatternType.STREAMING_URL }
-        val mediaPatterns = patterns.filter { it.type == PatternType.MEDIA_URL }
-        val apiPatterns = patterns.filter { it.type == PatternType.API_ENDPOINT }
-        val detailPatterns = patterns.filter { it.type == PatternType.DETAIL_PAGE }
-
-        sb.appendLine("--- Detected Patterns ---")
-        sb.appendLine("  Search endpoints  : ${searchPatterns.size}")
-        searchPatterns.take(3).forEach { sb.appendLine("    → ${it.url.take(100)}") }
-
-        sb.appendLine("  Streaming URLs    : ${streamingPatterns.size}")
-        streamingPatterns.take(3).forEach { sb.appendLine("    → ${it.url.take(100)}") }
-
-        sb.appendLine("  Media URLs        : ${mediaPatterns.size}")
-        mediaPatterns.take(3).forEach { sb.appendLine("    → ${it.url.take(100)}") }
-
-        sb.appendLine("  API endpoints     : ${apiPatterns.size}")
-        apiPatterns.take(3).forEach { sb.appendLine("    → ${it.url.take(100)}") }
-
-        sb.appendLine("  Detail pages      : ${detailPatterns.size}")
-        detailPatterns.take(3).forEach { sb.appendLine("    → ${it.url.take(100)}") }
-
-        sb.appendLine()
-        sb.appendLine("--- Detected Common Headers ---")
-        if (commonHeaders.isEmpty()) {
-            sb.appendLine("  (none detected)")
-        } else {
-            commonHeaders.forEach { (k, v) -> sb.appendLine("  $k: ${v.take(80)}") }
-        }
-
-        sb.appendLine()
-        sb.appendLine("--- Detected Cookies ---")
-        if (allCookies.isEmpty()) {
-            sb.appendLine("  (none detected)")
-        } else {
-            allCookies.take(20).forEach { sb.appendLine("  ${it.take(100)}") }
-            if (allCookies.size > 20) sb.appendLine("  ... and ${allCookies.size - 20} more")
-        }
-
-        sb.appendLine()
-        sb.appendLine("--- All Unique Domains ---")
-        uniqueDomains.sorted().forEach { sb.appendLine("  $it") }
-
-        return sb.toString()
     }
 }

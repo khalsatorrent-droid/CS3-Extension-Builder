@@ -25,9 +25,7 @@ class LogFragment : Fragment() {
 
     private var _binding: FragmentLogBinding? = null
     private val binding get() = _binding!!
-
     private lateinit var adapter: LogAdapter
-    private var generatedTemplate: com.khalsatorrent.cs3builder.model.CS3Template? = null
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -40,7 +38,6 @@ class LogFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-
         setupRecyclerView()
         observeLogs()
         setupMenu()
@@ -65,17 +62,10 @@ class LogFragment : Fragment() {
             override fun onCreateMenu(menu: Menu, menuInflater: MenuInflater) {
                 menuInflater.inflate(R.menu.menu_main, menu)
             }
-
-            override fun onMenuItemSelected(menuItem: MenuItem): Boolean {
-                return when (menuItem.itemId) {
-                    R.id.action_clear_logs -> {
-                        ProxyInterceptor.clearLogs()
-                        true
-                    }
-                    R.id.action_generate_cs3 -> {
-                        generateAndNavigate()
-                        true
-                    }
+            override fun onMenuItemSelected(item: MenuItem): Boolean {
+                return when (item.itemId) {
+                    R.id.action_clear_logs -> { ProxyInterceptor.clearLogs(); true }
+                    R.id.action_generate_cs3 -> { generateAndNavigate(); true }
                     else -> false
                 }
             }
@@ -86,30 +76,26 @@ class LogFragment : Fragment() {
         val logs = ProxyInterceptor.getSnapshot()
         if (logs.isEmpty()) {
             AlertDialog.Builder(requireContext())
-                .setTitle("No Logs")
-                .setMessage("Browse some pages first to capture network traffic.")
+                .setTitle("No Logs Yet")
+                .setMessage("Browse a website to capture network traffic first.\n\nTip: Visit a search page, click a video, and go back — this captures the key API calls needed to build a CS3 extension.")
                 .setPositiveButton("OK", null)
                 .show()
             return
         }
-
         val template = CS3CodeGenerator.generate(logs)
-        generatedTemplate = template
-
-        (requireActivity() as? com.khalsatorrent.cs3builder.MainActivity)
-            ?.navigateToCode(template)
+        (requireActivity() as? com.khalsatorrent.cs3builder.MainActivity)?.navigateToCode(template)
     }
 
     private fun showLogDetail(log: NetworkLog) {
-        val timeFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+        val timeFmt = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
         val sb = StringBuilder()
 
-        sb.appendLine("=== Request ===")
-        sb.appendLine("Time    : ${timeFormat.format(Date(log.timestamp))}")
-        sb.appendLine("Method  : ${log.method}")
-        sb.appendLine("URL     : ${log.url}")
-        sb.appendLine("XHR     : ${log.isXHR}")
-        sb.appendLine("Duration: ${log.duration}ms")
+        sb.appendLine("=== REQUEST ===")
+        sb.appendLine("Time     : ${timeFmt.format(Date(log.timestamp))}")
+        sb.appendLine("Method   : ${log.method}")
+        sb.appendLine("URL      : ${log.url}")
+        sb.appendLine("XHR/Fetch: ${log.isXHR}")
+        if (log.duration > 0) sb.appendLine("Duration : ${log.duration}ms")
         sb.appendLine()
 
         if (log.requestHeaders.isNotEmpty()) {
@@ -124,9 +110,9 @@ class LogFragment : Fragment() {
             sb.appendLine()
         }
 
-        sb.appendLine("=== Response ===")
-        sb.appendLine("Status  : ${if (log.responseCode > 0) log.responseCode.toString() else "N/A (WebView intercept)"}")
-        sb.appendLine("MIME    : ${log.mimeType ?: "unknown"}")
+        sb.appendLine("=== RESPONSE ===")
+        sb.appendLine("Status   : ${if (log.responseCode > 0) log.responseCode else "N/A (WebView)"}")
+        sb.appendLine("MIME     : ${log.mimeType ?: "unknown"}")
         sb.appendLine()
 
         if (log.responseHeaders.isNotEmpty()) {
@@ -136,20 +122,25 @@ class LogFragment : Fragment() {
         }
 
         if (log.cookies.isNotEmpty()) {
-            sb.appendLine("--- Cookies (Set-Cookie) ---")
+            sb.appendLine("--- Cookies ---")
             log.cookies.forEach { sb.appendLine(it) }
             sb.appendLine()
         }
 
         if (!log.responseBody.isNullOrBlank()) {
-            sb.appendLine("--- Response Body (first 1500 chars) ---")
-            sb.appendLine(log.responseBody.take(1500))
+            sb.appendLine("--- Response Body ---")
+            sb.appendLine(log.responseBody.take(3000))
         }
 
         AlertDialog.Builder(requireContext())
-            .setTitle("Log Detail")
+            .setTitle("Request Detail")
             .setMessage(sb.toString())
             .setPositiveButton("Close", null)
+            .setNeutralButton("Copy URL") { _, _ ->
+                val clipboard = requireContext().getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                    as android.content.ClipboardManager
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("URL", log.url))
+            }
             .show()
     }
 

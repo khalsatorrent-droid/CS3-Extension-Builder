@@ -10,13 +10,25 @@
         android:layout_height="match_parent"
         android:orientation="vertical">
 
+        <!-- URL Bar -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:padding="8dp"
             android:background="?attr/colorSurface"
-            android:elevation="4dp">
+            android:elevation="4dp"
+            android:gravity="center_vertical">
+
+            <ImageButton
+                android:id="@+id/btnBack"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Back"
+                android:src="@drawable/ic_arrow_back"
+                android:tint="?attr/colorOnSurface"
+                android:layout_marginEnd="4dp" />
 
             <EditText
                 android:id="@+id/etUrl"
@@ -28,29 +40,71 @@
                 android:inputType="textUri"
                 android:imeOptions="actionGo"
                 android:singleLine="true"
-                android:textSize="14sp"
-                android:background="@android:color/transparent"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp" />
+                android:textSize="13sp"
+                android:background="@drawable/bg_url_bar"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnGo"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/btn_go"
-                android:minWidth="64dp"
+                android:minWidth="56dp"
                 style="@style/Widget.Material3.Button" />
 
         </LinearLayout>
 
+        <!-- Progress bar -->
         <ProgressBar
             android:id="@+id/progressBar"
             android:layout_width="match_parent"
             android:layout_height="4dp"
             android:visibility="gone"
-            style="@style/Widget.AppCompat.ProgressBar.Horizontal"
-            android:indeterminate="true" />
+            android:indeterminate="true"
+            style="@style/Widget.Material3.LinearProgressIndicator" />
 
+        <!-- Capture status bar -->
+        <LinearLayout
+            android:id="@+id/captureBar"
+            android:layout_width="match_parent"
+            android:layout_height="32dp"
+            android:orientation="horizontal"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:gravity="center_vertical"
+            android:background="@color/capture_bar_bg">
+
+            <View
+                android:id="@+id/captureIndicator"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:background="@drawable/bg_indicator_dot"
+                android:layout_marginEnd="6dp" />
+
+            <TextView
+                android:id="@+id/tvCaptureStatus"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Capturing traffic…"
+                android:textSize="11sp"
+                android:textColor="@color/white"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvLogCount"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0 requests"
+                android:textSize="11sp"
+                android:textColor="@color/white" />
+
+        </LinearLayout>
+
+        <!-- WebView -->
         <WebView
             android:id="@+id/webView"
             android:layout_width="match_parent"
@@ -59,6 +113,7 @@
 
     </LinearLayout>
 
+    <!-- Clear FAB -->
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fabClear"
         android:layout_width="wrap_content"
@@ -66,6 +121,7 @@
         android:layout_gravity="bottom|end"
         android:layout_margin="16dp"
         android:contentDescription="@string/fab_clear_logs"
-        app:srcCompat="@drawable/ic_delete" />
+        app:srcCompat="@drawable/ic_delete"
+        app:backgroundTint="@color/method_delete" />
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

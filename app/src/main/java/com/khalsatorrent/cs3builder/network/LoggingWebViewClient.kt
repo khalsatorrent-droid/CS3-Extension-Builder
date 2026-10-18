@@ -23,11 +23,8 @@ class LoggingWebViewClient(
         request: WebResourceRequest?
     ): WebResourceResponse? {
         request?.let {
-            val headers = mutableMapOf<String, String>()
-            it.requestHeaders?.forEach { (k, v) -> headers[k] = v }
-
+            val headers = it.requestHeaders?.toMutableMap() ?: mutableMapOf()
             val isXHR = headers["X-Requested-With"]?.contains("XMLHttpRequest", true) == true
-
             val log = NetworkLog(
                 id = UUID.randomUUID().toString(),
                 timestamp = System.currentTimeMillis(),
@@ -35,7 +32,7 @@ class LoggingWebViewClient(
                 url = it.url.toString(),
                 requestHeaders = headers,
                 requestBody = null,
-                responseCode = 0,
+                responseCode = 0,         // not available from WebView intercept
                 responseHeaders = emptyMap(),
                 responseBody = null,
                 cookies = emptyList(),
@@ -60,101 +57,122 @@ class LoggingWebViewClient(
     }
 
     private fun injectJsInterceptor(webView: WebView) {
+        // language=JavaScript
         val js = """
 (function() {
-    if (window.__cs3BuilderInjected) return;
-    window.__cs3BuilderInjected = true;
+    if (window.__cs3Injected) return;
+    window.__cs3Injected = true;
 
-    var origFetch = window.fetch;
+    /* ---- intercept fetch ---- */
+    var _fetch = window.fetch;
     window.fetch = function(input, init) {
-        var url = (typeof input === 'string') ? input : input.url;
-        var method = (init && init.method) ? init.method : 'GET';
+        var url = typeof input === 'string' ? input : (input && input.url) || '';
+        var method = (init && init.method) ? init.method.toUpperCase() : 'GET';
         var headers = {};
         if (init && init.headers) {
-            if (init.headers instanceof Headers) {
-                init.headers.forEach(function(v, k) { headers[k] = v; });
-            } else {
-                headers = init.headers;
-            }
+            try {
+                if (init.headers instanceof Headers) {
+                    init.headers.forEach(function(v, k) { headers[k] = v; });
+                } else {
+                    Object.assign(headers, init.headers);
+                }
+            } catch(e) {}
         }
-        var body = (init && init.body) ? String(init.body).substring(0, 10000) : null;
-        try {
-            window.CS3Bridge.onRequest(JSON.stringify({
-                url: url,
-                method: method,
-                headers: headers,
-                body: body,
-                type: 'fetch'
-            }));
-        } catch(e) {}
-        return origFetch.apply(this, arguments);
+        var body = (init && init.body) ? String(init.body).substring(0, 8000) : null;
+
+        var p = _fetch.apply(this, arguments);
+        p.then(function(res) {
+            var resClone = res.clone();
+            resClone.text().then(function(text) {
+                try {
+                    window.CS3Bridge.onRequestComplete(JSON.stringify({
+                        url: url, method: method, headers: headers, body: body,
+                        type: 'fetch',
+                        responseCode: res.status,
+                        responseBody: text.substring(0, 8000),
+                        contentType: res.headers.get('content-type') || ''
+                    }));
+                } catch(e) {}
+            }).catch(function() {
+                try {
+                    window.CS3Bridge.onRequestComplete(JSON.stringify({
+                        url: url, method: method, headers: headers, body: body,
+                        type: 'fetch', responseCode: res.status, responseBody: null, contentType: ''
+                    }));
+                } catch(e) {}
+            });
+        }).catch(function() {});
+        return p;
     };
 
-    var origXHROpen = XMLHttpRequest.prototype.open;
-    var origXHRSend = XMLHttpRequest.prototype.send;
-    XMLHttpRequest.prototype.open = function(method, url) {
-        this.__cs3Method = method;
-        this.__cs3Url = url;
-        this.__cs3Headers = {};
-        return origXHROpen.apply(this, arguments);
+    /* ---- intercept XHR ---- */
+    var _open  = XMLHttpRequest.prototype.open;
+    var _send  = XMLHttpRequest.prototype.send;
+    var _setHdr = XMLHttpRequest.prototype.setRequestHeader;
+    XMLHttpRequest.prototype.open = function(m, u) {
+        this._cs3m = m.toUpperCase(); this._cs3u = u; this._cs3h = {};
+        return _open.apply(this, arguments);
     };
-    var origSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
-    XMLHttpRequest.prototype.setRequestHeader = function(name, value) {
-        if (!this.__cs3Headers) this.__cs3Headers = {};
-        this.__cs3Headers[name] = value;
-        return origSetRequestHeader.apply(this, arguments);
+    XMLHttpRequest.prototype.setRequestHeader = function(n, v) {
+        if (!this._cs3h) this._cs3h = {};
+        this._cs3h[n] = v;
+        return _setHdr.apply(this, arguments);
     };
-    XMLHttpRequest.prototype.send = function(body) {
-        try {
-            window.CS3Bridge.onRequest(JSON.stringify({
-                url: this.__cs3Url,
-                method: this.__cs3Method || 'GET',
-                headers: this.__cs3Headers || {},
-                body: body ? String(body).substring(0, 10000) : null,
-                type: 'xhr'
-            }));
-        } catch(e) {}
-        return origXHRSend.apply(this, arguments);
+    XMLHttpRequest.prototype.send = function(data) {
+        var self = this;
+        this.addEventListener('load', function() {
+            try {
+                window.CS3Bridge.onRequestComplete(JSON.stringify({
+                    url: self._cs3u, method: self._cs3m || 'GET',
+                    headers: self._cs3h || {}, body: data ? String(data).substring(0, 8000) : null,
+                    type: 'xhr',
+                    responseCode: self.status,
+                    responseBody: (self.responseText || '').substring(0, 8000),
+                    contentType: self.getResponseHeader('content-type') || ''
+                }));
+            } catch(e) {}
+        });
+        return _send.apply(this, arguments);
     };
 })();
         """.trimIndent()
-
         webView.evaluateJavascript(js, null)
     }
 
     inner class JSBridge {
         @JavascriptInterface
-        fun onRequest(json: String) {
+        fun onRequestComplete(json: String) {
             try {
-                val type = object : TypeToken<Map<String, Any>>() {}.type
-                val data: Map<String, Any> = gson.fromJson(json, type)
-
-                val url = data["url"] as? String ?: return
-                val method = (data["method"] as? String ?: "GET").uppercase()
-
                 @Suppress("UNCHECKED_CAST")
-                val headersRaw = data["headers"] as? Map<String, String> ?: emptyMap()
+                val data = gson.fromJson<Map<String, Any>>(
+                    json, object : TypeToken<Map<String, Any>>() {}.type
+                )
+                val url = data["url"] as? String ?: return
+                val method = ((data["method"] as? String) ?: "GET").uppercase()
+                @Suppress("UNCHECKED_CAST")
+                val hdrs = (data["headers"] as? Map<String, String>) ?: emptyMap()
                 val body = data["body"] as? String
+                val responseCode = (data["responseCode"] as? Number)?.toInt() ?: 0
+                val responseBody = data["responseBody"] as? String
+                val contentType = data["contentType"] as? String
 
                 val log = NetworkLog(
                     id = UUID.randomUUID().toString(),
                     timestamp = System.currentTimeMillis(),
                     method = method,
                     url = url,
-                    requestHeaders = headersRaw,
+                    requestHeaders = hdrs,
                     requestBody = body,
-                    responseCode = 0,
-                    responseHeaders = emptyMap(),
-                    responseBody = null,
+                    responseCode = responseCode,
+                    responseHeaders = if (contentType != null) mapOf("Content-Type" to contentType) else emptyMap(),
+                    responseBody = responseBody,
                     cookies = emptyList(),
-                    mimeType = null,
+                    mimeType = contentType?.substringBefore(";")?.trim(),
                     isXHR = true,
                     duration = 0L
                 )
                 ProxyInterceptor.addLog(log)
-            } catch (e: Exception) {
-                // Silently ignore malformed JS bridge calls
-            }
+            } catch (_: Exception) {}
         }
     }
 }

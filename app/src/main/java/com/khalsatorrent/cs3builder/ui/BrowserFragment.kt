@@ -33,9 +33,9 @@ class BrowserFragment : Fragment() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-
         setupWebView()
         setupControls()
+        observeLogs()
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -45,12 +45,14 @@ class BrowserFragment : Fragment() {
                 activity?.runOnUiThread {
                     binding.etUrl.setText(url)
                     binding.progressBar.visibility = View.VISIBLE
+                    binding.btnBack.isEnabled = binding.webView.canGoBack()
                 }
             },
             onPageFinishedCallback = { url ->
                 activity?.runOnUiThread {
                     binding.etUrl.setText(url)
                     binding.progressBar.visibility = View.GONE
+                    binding.btnBack.isEnabled = binding.webView.canGoBack()
                 }
             }
         )
@@ -66,13 +68,19 @@ class BrowserFragment : Fragment() {
                 builtInZoomControls = true
                 displayZoomControls = false
                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                userAgentString = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36"
+                userAgentString = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
             }
             addJavascriptInterface(loggingClient.JSBridge(), "CS3Bridge")
         }
+
+        binding.btnBack.isEnabled = false
     }
 
     private fun setupControls() {
+        binding.btnBack.setOnClickListener {
+            if (binding.webView.canGoBack()) binding.webView.goBack()
+        }
+
         binding.btnGo.setOnClickListener { loadUrl() }
 
         binding.etUrl.setOnEditorActionListener { _, actionId, _ ->
@@ -84,6 +92,21 @@ class BrowserFragment : Fragment() {
 
         binding.fabClear.setOnClickListener {
             ProxyInterceptor.clearLogs()
+        }
+    }
+
+    private fun observeLogs() {
+        ProxyInterceptor.logs.observe(viewLifecycleOwner) { logs ->
+            val count = logs.size
+            binding.tvLogCount.text = "$count request${if (count == 1) "" else "s"}"
+            if (count > 0) {
+                binding.tvCaptureStatus.text = "Capturing — $count logged"
+                binding.captureIndicator.setBackgroundResource(
+                    com.khalsatorrent.cs3builder.R.drawable.bg_indicator_dot
+                )
+            } else {
+                binding.tvCaptureStatus.text = "Ready — browse to start capturing"
+            }
         }
     }
 
@@ -100,10 +123,10 @@ class BrowserFragment : Fragment() {
         binding.webView.loadUrl(url)
     }
 
-    fun canGoBack(): Boolean = binding.webView.canGoBack()
+    fun canGoBack(): Boolean = _binding?.webView?.canGoBack() == true
 
     fun goBack() {
-        binding.webView.goBack()
+        _binding?.webView?.goBack()
     }
 
     override fun onDestroyView() {
