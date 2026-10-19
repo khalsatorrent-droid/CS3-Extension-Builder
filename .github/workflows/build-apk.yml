@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build:
-    name: Build & Publish Rolling Release
+    name: Build & Release
     runs-on: ubuntu-latest
 
     steps:
@@ -18,6 +18,43 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump patch version
+        id: version
+        run: |
+          chmod +x scripts/bump-version.sh
+          bash scripts/bump-version.sh patch
+          VERSION_NAME=$(grep '^android.versionName=' version.properties | cut -d= -f2)
+          VERSION_CODE=$(grep '^android.versionCode=' version.properties | cut -d= -f2)
+          echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
+          echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
+          echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_OUTPUT
+          echo "TAG=v$VERSION_NAME" >> $GITHUB_OUTPUT
+
+      - name: Commit & push version bump
+        run: |
+          git add version.properties CHANGELOG.md
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+          else
+            git commit -m "chore: bump version to ${{ steps.version.outputs.VERSION_NAME }} [skip ci]"
+            git push origin HEAD
+          fi
+
+      - name: Tag release
+        run: |
+          TAG="${{ steps.version.outputs.TAG }}"
+          # Delete tag if it already exists (re-run case)
+          git tag -d "$TAG" 2>/dev/null || true
+          git push origin ":refs/tags/$TAG" 2>/dev/null || true
+          git tag "$TAG"
+          git push origin "$TAG"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -26,27 +63,17 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: Read version
-        id: version
-        run: |
-          VERSION_NAME=$(grep '^android.versionName=' version.properties | cut -d= -f2)
-          VERSION_CODE=$(grep '^android.versionCode=' version.properties | cut -d= -f2)
-          echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
-          echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
-
       - name: Set up signing keystore
         run: |
           if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
             echo "Using production keystore"
             echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > ci/release.jks
-            echo "KEY_STORE_PATH=$PWD/ci/release.jks" >> $GITHUB_ENV
             echo "KEY_STORE_PASS=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >> $GITHUB_ENV
             echo "KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> $GITHUB_ENV
             echo "KEY_PASS=${{ secrets.ANDROID_KEY_PASSWORD }}" >> $GITHUB_ENV
           else
             echo "Using sideload keystore"
             cat ci/sideload.jks.b64 | base64 -d > ci/release.jks
-            echo "KEY_STORE_PATH=$PWD/ci/release.jks" >> $GITHUB_ENV
             echo "KEY_STORE_PASS=android" >> $GITHUB_ENV
             echo "KEY_ALIAS=release" >> $GITHUB_ENV
             echo "KEY_PASS=android" >> $GITHUB_ENV
@@ -65,8 +92,6 @@ jobs:
         run: |
           echo "====== GRADLE BUILD LOG (last 200 lines) ======"
           tail -200 /tmp/gradle-build.log || true
-          echo "====== END OF LOG ======"
-          # Emit key errors as workflow annotations (readable via annotations API)
           grep -E "^e:.*\.kt|error:|Caused by:|> Task .* FAILED|Could not resolve|unresolved reference|aapt2|\.xml:" /tmp/gradle-build.log | head -30 | while IFS= read -r line; do
             echo "::error::$line"
           done || true
@@ -82,37 +107,52 @@ jobs:
       - name: Sign & rename APK
         run: |
           mkdir -p dist
-          # Find apksigner
           APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | sort -V | tail -1)
+          APK_NAME="CS3-Extension-Builder-${{ steps.version.outputs.TAG }}.apk"
           $APKSIGNER sign \
             --ks ci/release.jks \
             --ks-pass pass:$KEY_STORE_PASS \
             --key-pass pass:$KEY_PASS \
             --ks-key-alias $KEY_ALIAS \
-            --out dist/CS3-Extension-Builder.apk \
+            --out "dist/$APK_NAME" \
             app/build/outputs/apk/debug/app-debug.apk
+          echo "APK_NAME=$APK_NAME" >> $GITHUB_ENV
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: CS3-Extension-Builder-${{ github.run_number }}
-          path: dist/CS3-Extension-Builder.apk
+          path: dist/${{ env.APK_NAME }}
           retention-days: 30
 
-      - name: Update rolling "latest" release
+      - name: Generate release notes
+        id: notes
+        run: |
+          chmod +x scripts/release-notes.sh
+          NOTES=$(bash scripts/release-notes.sh "${{ steps.version.outputs.VERSION_NAME }}")
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create versioned GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: latest
-          name: "Latest Build (v${{ env.VERSION_NAME }})"
-          prerelease: true
-          files: dist/CS3-Extension-Builder.apk
-          body: |
-            ⚡ **Rolling build** from `${{ github.ref_name }}` @ `${{ github.sha }}`
-
-            This release is automatically updated on every push. For stable versioned releases, see the tagged releases below.
-
-            **Version:** ${{ env.VERSION_NAME }} (build ${{ env.VERSION_CODE }})
-            **Commit:** ${{ github.sha }}
-            **Run:** #${{ github.run_number }}
+          tag_name: ${{ steps.version.outputs.TAG }}
+          name: "CS3 Extension Builder ${{ steps.version.outputs.TAG }}"
+          body: ${{ steps.notes.outputs.notes }}
+          files: dist/${{ env.APK_NAME }}
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Post to Telegram
+        if: ${{ vars.TELEGRAM_ENABLED == 'true' }}
+        uses: appleboy/telegram-action@v1.0.0
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message_thread_id: ${{ secrets.TELEGRAM_TOPIC_ID }}
+          format: markdown
+          message: |
+            🚀 *CS3 Extension Builder ${{ steps.version.outputs.TAG }} released\!*
+            [Download APK](https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.TAG }})
