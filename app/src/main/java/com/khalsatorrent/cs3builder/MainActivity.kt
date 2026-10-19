@@ -1,7 +1,10 @@
 package com.khalsatorrent.cs3builder
 
 import android.os.Bundle
+import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.Fragment
 import com.khalsatorrent.cs3builder.databinding.ActivityMainBinding
 import com.khalsatorrent.cs3builder.model.CS3Template
@@ -21,9 +24,22 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
+
+        // Ensure UI is never hidden behind system bars
+        ViewCompat.setOnApplyWindowInsetsListener(binding.appBarLayout) { v, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(0, systemBars.top, 0, 0)
+            insets
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(binding.bottomNav) { v, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(0, 0, 0, systemBars.bottom)
+            insets
+        }
 
         if (savedInstanceState == null) {
             supportFragmentManager.beginTransaction().apply {
@@ -68,6 +84,11 @@ class MainActivity : AppCompatActivity() {
         binding.bottomNav.selectedItemId = R.id.nav_code
     }
 
+    fun navigateToLogs() {
+        binding.bottomNav.selectedItemId = R.id.nav_logs
+    }
+
+    @Suppress("OVERRIDE_DEPRECATION")
     override fun onBackPressed() {
         if (activeFragment is BrowserFragment) {
             val browser = activeFragment as BrowserFragment

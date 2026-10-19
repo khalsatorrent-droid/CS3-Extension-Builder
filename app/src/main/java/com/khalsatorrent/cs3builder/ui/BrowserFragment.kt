@@ -138,6 +138,11 @@ class BrowserFragment : Fragment() {
             ProxyInterceptor.clearLogs()
         }
 
+        // Quick jump to Logs tab from capture bar
+        binding.btnViewLogs.setOnClickListener {
+            (requireActivity() as? com.khalsatorrent.cs3builder.MainActivity)?.navigateToLogs()
+        }
+
         // Ad block toggle button
         binding.btnAdBlock.setOnClickListener {
             showAdBlockMenu()
