@@ -42,7 +42,13 @@ class BrowserFragment : Fragment() {
     private val binding get() = _binding!!
 
     private lateinit var prefs: Prefs
-    private lateinit var loggingClient: LoggingWebViewClient
+    /** Browser tabs; tab 0 is the WebView from the layout. Popups (window.open) open as new tabs. */
+    private val tabs = mutableListOf<WebView>()
+    private val tabClients = HashMap<WebView, LoggingWebViewClient>()
+    private val tabOpener = HashMap<WebView, WebView>()
+    private var currentTab = 0
+    private val web: WebView get() = tabs.getOrNull(currentTab) ?: binding.webView
+    private val loggingClient: LoggingWebViewClient get() = tabClients[web] ?: tabClients.values.first()
     private var documentStartHook = false
     private var mobileUserAgent = ""
 
@@ -77,11 +83,27 @@ class BrowserFragment : Fragment() {
     @SuppressLint("SetJavaScriptEnabled")
     private fun setupWebView() {
         WebView.setWebContentsDebuggingEnabled(true) // inspect via chrome://inspect when on USB
-        val webView = binding.webView
         mobileUserAgent = WebSettings.getDefaultUserAgent(requireContext())
             .replace("; wv)", ")").replace(Regex("Version/\\d+\\.\\d+ "), "")
+        CookieManager.getInstance().setAcceptCookie(true)
+        tabs.clear()
+        tabs += binding.webView
+        currentTab = 0
+        configureTab(binding.webView)
+        // Requests made by service workers bypass WebViewClient — log them too
+        try {
+            android.webkit.ServiceWorkerController.getInstance().setServiceWorkerClient(object : android.webkit.ServiceWorkerClient() {
+                override fun shouldInterceptRequest(request: android.webkit.WebResourceRequest): android.webkit.WebResourceResponse? =
+                    tabClients.values.firstOrNull()?.shouldInterceptRequest(null, request)
+            })
+        } catch (_: Throwable) { }
+        binding.btnBack.isEnabled = false
+        updateTabButton()
+    }
 
-        loggingClient = LoggingWebViewClient(
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun configureTab(webView: WebView) {
+        val client = LoggingWebViewClient(
             packageName = requireContext().packageName,
             settings = object : LoggingWebViewClient.Settings {
                 override val deepCapture get() = prefs.deepCapture
@@ -94,16 +116,19 @@ class BrowserFragment : Fragment() {
                 override fun onPageStarted(url: String) {
                     activity?.runOnUiThread {
                         val b = _binding ?: return@runOnUiThread
+                        if (webView !== web) return@runOnUiThread
                         if (!b.etUrl.hasFocus()) b.etUrl.setText(url)
                         b.startPanel.visibility = View.GONE
-                        b.btnBack.isEnabled = b.webView.canGoBack()
+                        b.btnBack.isEnabled = canGoBackAnywhere()
                     }
                 }
                 override fun onPageFinished(url: String) {
                     activity?.runOnUiThread {
                         val b = _binding ?: return@runOnUiThread
+                        updateTabButton()
+                        if (webView !== web) return@runOnUiThread
                         if (!b.etUrl.hasFocus()) b.etUrl.setText(url)
-                        b.btnBack.isEnabled = b.webView.canGoBack()
+                        b.btnBack.isEnabled = canGoBackAnywhere()
                         if (url.startsWith("http")) {
                             prefs.lastUrl = url
                             prefs.addRecentSite(url)
@@ -113,32 +138,28 @@ class BrowserFragment : Fragment() {
             }
         )
 
-        CookieManager.getInstance().setAcceptCookie(true)
+        tabClients[webView] = client
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true) // embedded players need these
 
-        webView.webViewClient = loggingClient
-        // Requests made by service workers bypass WebViewClient — log them too
-        try {
-            android.webkit.ServiceWorkerController.getInstance().setServiceWorkerClient(object : android.webkit.ServiceWorkerClient() {
-                override fun shouldInterceptRequest(request: android.webkit.WebResourceRequest): android.webkit.WebResourceResponse? =
-                    loggingClient.shouldInterceptRequest(null, request)
-            })
-        } catch (_: Throwable) { }
+        webView.webViewClient = client
         webView.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                 val b = _binding ?: return
+                if (view !== web) return
                 b.progressBar.visibility = if (newProgress in 1..99) View.VISIBLE else View.INVISIBLE
                 b.progressBar.setProgressCompat(newProgress, true)
             }
             override fun onShowCustomView(view: View?, callback: CustomViewCallback?) = enterFullscreen(view, callback)
             override fun onHideCustomView() = exitFullscreen()
-            // window.open / target=_blank: load in the same view unless the ad blocker is on
-            // window.open / target=_blank: open a real popup window in an overlay. Ad-gated players
-            // ("watch 5 ads to unlock") check that the popup actually opened.
+            // window.open / target=_blank: open a real new tab and keep the opener alive, so ad-gated
+            // players ("watch 5 ads to unlock") see the ad open and keep their progress.
             override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean {
                 if (resultMsg == null) return false
                 if (prefs.adBlock && !isUserGesture) return false
-                return openPopup(resultMsg)
+                return openInNewTab(webView, resultMsg)
+            }
+            override fun onCloseWindow(window: WebView?) {
+                window?.let { closeTab(it) }
             }
         }
 
@@ -157,7 +178,7 @@ class BrowserFragment : Fragment() {
             setSupportMultipleWindows(true)
             userAgentString = currentUserAgent()
         }
-        webView.addJavascriptInterface(loggingClient.JSBridge(), "CS3Bridge")
+        webView.addJavascriptInterface(client.JSBridge(), "CS3Bridge")
 
         // Inject the capture hook before any page script runs, in every frame (iframes too)
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
@@ -176,29 +197,27 @@ class BrowserFragment : Fragment() {
                     responseCode = 0, responseHeaders = emptyMap(), responseBody = "[download — ${mimetype ?: "unknown"}, $contentLength bytes]",
                     cookies = emptyList(), mimeType = mimetype, isXHR = false, duration = 0,
                     source = "webview", kind = LogKind.classify(url, mimetype).let { if (it == LogKind.OTHER) LogKind.MEDIA else it },
-                    pageUrl = _binding?.webView?.url
+                    pageUrl = webView.url
                 )
             )
-            Toast.makeText(requireContext(), "Download link captured in Logs", Toast.LENGTH_SHORT).show()
+            context?.let { Toast.makeText(it, "Download link captured in Logs", Toast.LENGTH_SHORT).show() }
         }
-
-        binding.btnBack.isEnabled = false
     }
 
     private fun currentUserAgent(): String =
         if (prefs.desktopMode) DESKTOP_UA else mobileUserAgent.ifBlank { MOBILE_UA }
 
     private fun setupControls() {
-        binding.btnBack.setOnClickListener { if (binding.webView.canGoBack()) binding.webView.goBack() }
+        binding.btnBack.setOnClickListener { handleBack() }
         binding.btnReload.setOnClickListener {
-            if (binding.webView.url == null) loadUrl() else binding.webView.reload()
+            if (web.url == null) loadUrl() else web.reload()
         }
+        binding.btnTabs.setOnClickListener { showTabs() }
         binding.etUrl.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_GO || actionId == EditorInfo.IME_ACTION_DONE) { loadUrl(); true } else false
         }
         binding.btnViewLogs.setOnClickListener { (activity as? MainActivity)?.navigateToLogs() }
         binding.btnMenu.setOnClickListener { showMenu(it) }
-        binding.btnClosePopup.setOnClickListener { closePopup() }
     }
 
     private fun showMenu(anchor: View) {
@@ -225,15 +244,15 @@ class BrowserFragment : Fragment() {
                     toast(if (prefs.deepCapture) "Deep capture on — reload the page" else "Deep capture off (use if a site breaks)") }
                 M_DOM -> { prefs.domSnapshots = !prefs.domSnapshots; updateModes() }
                 M_ADS -> { prefs.adBlock = !prefs.adBlock; updateModes()
-                    if (prefs.adBlock) binding.webView.evaluateJavascript(CaptureScripts.AD_BLOCK, null)
+                    if (prefs.adBlock) web.evaluateJavascript(CaptureScripts.AD_BLOCK, null)
                     toast(if (prefs.adBlock) "Ad & popup blocking on" else "Ad blocking off") }
                 M_DESKTOP -> { prefs.desktopMode = !prefs.desktopMode
-                    binding.webView.settings.userAgentString = currentUserAgent()
-                    updateModes(); binding.webView.reload() }
+                    tabs.forEach { it.settings.userAgentString = currentUserAgent() }
+                    updateModes(); web.reload() }
                 M_PAUSE -> LogRepository.setPaused(!LogRepository.isPaused)
-                M_SNAPSHOT -> { val url = binding.webView.url
-                    if (url != null) { loggingClient.snapshotDom(binding.webView, url); toast("Page HTML saved to Logs") } }
-                M_COPY_URL -> binding.webView.url?.let { ShareUtils.copyToClipboard(requireContext(), it, "URL") }
+                M_SNAPSHOT -> { val url = web.url
+                    if (url != null) { loggingClient.snapshotDom(web, url); toast("Page HTML saved to Logs") } }
+                M_COPY_URL -> web.url?.let { ShareUtils.copyToClipboard(requireContext(), it, "URL") }
                 M_COOKIES -> showCookies()
                 M_CLEAR_LOGS -> LogRepository.clearLogs()
                 M_CLEAR_DATA -> confirmClearData()
@@ -247,7 +266,7 @@ class BrowserFragment : Fragment() {
     }
 
     private fun showCookies() {
-        val url = binding.webView.url ?: return
+        val url = web.url ?: return
         val cookies = CookieManager.getInstance().getCookie(url)
         val text = cookies?.split(";")?.joinToString("\n") { it.trim() }?.ifBlank { null } ?: "(no cookies)"
         AlertDialog.Builder(requireContext())
@@ -266,8 +285,8 @@ class BrowserFragment : Fragment() {
                 CookieManager.getInstance().removeAllCookies(null)
                 CookieManager.getInstance().flush()
                 WebStorage.getInstance().deleteAllData()
-                binding.webView.clearCache(true)
-                binding.webView.clearHistory()
+                web.clearCache(true)
+                web.clearHistory()
                 toast("Cleared")
             }
             .setNegativeButton("Cancel", null)
@@ -331,65 +350,80 @@ class BrowserFragment : Fragment() {
         b.etUrl.clearFocus()
         (requireContext().getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as InputMethodManager)
             .hideSoftInputFromWindow(b.etUrl.windowToken, 0)
-        b.webView.loadUrl(url)
+        web.loadUrl(url)
     }
 
-    // ---- popup windows ----
+    // ---- tabs (popups open here so the opener page keeps its state) ----
 
-    private var popupWebView: WebView? = null
-
-    @SuppressLint("SetJavaScriptEnabled")
-    private fun openPopup(resultMsg: android.os.Message): Boolean {
+    private fun openInNewTab(opener: WebView, resultMsg: android.os.Message): Boolean {
         val b = _binding ?: return false
-        closePopup()
-        val popup = WebView(requireContext())
-        popup.settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            databaseEnabled = true
-            loadWithOverviewMode = true
-            useWideViewPort = true
-            mediaPlaybackRequiresUserGesture = false
-            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-            javaScriptCanOpenWindowsAutomatically = false
-            setSupportMultipleWindows(false)
-            userAgentString = currentUserAgent()
-        }
-        CookieManager.getInstance().setAcceptThirdPartyCookies(popup, true)
-        popup.webViewClient = object : android.webkit.WebViewClient() {
-            override fun shouldInterceptRequest(view: WebView?, request: android.webkit.WebResourceRequest?) =
-                loggingClient.shouldInterceptRequest(view, request)
-            override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean {
-                val scheme = request?.url?.scheme?.lowercase()
-                return scheme != "http" && scheme != "https" // swallow intent:// / market:// links
-            }
-            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                _binding?.tvPopupUrl?.text = url ?: ""
-            }
-        }
-        popup.webChromeClient = object : WebChromeClient() {
-            override fun onCloseWindow(window: WebView?) = closePopup()
-        }
-        b.popupHost.addView(popup, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        b.tvPopupUrl.text = "Opening popup…"
-        b.popupContainer.visibility = View.VISIBLE
-        popupWebView = popup
-        val transport = resultMsg.obj as? WebView.WebViewTransport ?: run { closePopup(); return false }
-        transport.webView = popup
+        val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
+        if (tabs.size >= MAX_TABS) closeTab(tabs[1])
+        val tab = WebView(requireContext())
+        configureTab(tab)
+        tab.settings.setSupportMultipleWindows(true)
+        b.webContainer.addView(tab, b.webContainer.indexOfChild(b.startPanel), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        tabs += tab
+        tabOpener[tab] = opener
+        transport.webView = tab
         resultMsg.sendToTarget()
+        switchTo(tabs.lastIndex)
+        toast("Opened in a new tab — press back to return")
         return true
     }
 
-    private fun closePopup() {
-        val popup = popupWebView ?: return
-        popupWebView = null
-        _binding?.let { b ->
-            b.popupHost.removeView(popup)
-            b.popupContainer.visibility = View.GONE
+    private fun switchTo(index: Int) {
+        val b = _binding ?: return
+        if (index !in tabs.indices) return
+        val previous = web
+        currentTab = index
+        val now = web
+        tabs.forEach { it.visibility = if (it === now) View.VISIBLE else View.INVISIBLE }
+        if (previous !== now) {
+            // Pages that wait for you to "come back" from an ad listen for focus / visibility
+            now.evaluateJavascript(RETURN_EVENTS, null)
         }
-        popup.stopLoading()
-        popup.destroy()
+        b.startPanel.visibility = if (now.url == null && tabs.size == 1) View.VISIBLE else View.GONE
+        b.etUrl.setText(now.url ?: "")
+        b.btnBack.isEnabled = canGoBackAnywhere()
+        updateTabButton()
     }
+
+    private fun closeTab(tab: WebView) {
+        val b = _binding ?: return
+        val index = tabs.indexOf(tab)
+        if (index <= 0) return // tab 0 is the main browser
+        val opener = tabOpener.remove(tab)
+        tabs.removeAt(index)
+        tabClients.remove(tab)
+        b.webContainer.removeView(tab)
+        tab.stopLoading()
+        tab.destroy()
+        val target = opener?.let { tabs.indexOf(it) }?.takeIf { it >= 0 } ?: (index - 1).coerceAtLeast(0)
+        currentTab = -1
+        switchTo(target)
+    }
+
+    private fun showTabs() {
+        if (tabs.size <= 1) { toast("Only one tab — popups from the page open here as new tabs"); return }
+        val labels = tabs.mapIndexed { i, t ->
+            val title = t.title?.takeIf { it.isNotBlank() } ?: t.url ?: "New tab"
+            (if (i == currentTab) "● " else "") + "${i + 1}. " + title.take(60)
+        }.toTypedArray()
+        AlertDialog.Builder(requireContext())
+            .setTitle("Tabs")
+            .setItems(labels) { _, i -> switchTo(i) }
+            .setNeutralButton("Close this tab") { _, _ -> closeTab(web) }
+            .setNegativeButton("Close all popups") { _, _ -> tabs.drop(1).forEach { closeTab(it) } }
+            .show()
+    }
+
+    private fun updateTabButton() {
+        val b = _binding ?: return
+        b.btnTabs.text = tabs.size.coerceAtLeast(1).toString()
+    }
+
+    private fun canGoBackAnywhere() = web.canGoBack() || currentTab > 0
 
     // ---- fullscreen video ----
 
@@ -425,13 +459,9 @@ class BrowserFragment : Fragment() {
     /** Returns true when the back press was consumed by the browser. */
     fun handleBack(): Boolean {
         if (customView != null) { exitFullscreen(); return true }
-        if (popupWebView != null) {
-            val p = popupWebView!!
-            if (p.canGoBack()) p.goBack() else closePopup()
-            return true
-        }
-        val wv = _binding?.webView ?: return false
-        if (wv.canGoBack()) { wv.goBack(); return true }
+        if (_binding == null) return false
+        if (web.canGoBack()) { web.goBack(); return true }
+        if (currentTab > 0) { closeTab(web); return true }
         return false
     }
 
@@ -443,9 +473,9 @@ class BrowserFragment : Fragment() {
     }
 
     override fun onDestroyView() {
-        closePopup()
         exitFullscreen()
-        _binding?.webView?.apply { stopLoading(); destroy() }
+        tabs.forEach { it.stopLoading(); it.destroy() }
+        tabs.clear(); tabClients.clear(); tabOpener.clear()
         super.onDestroyView()
         _binding = null
     }
@@ -463,6 +493,10 @@ class BrowserFragment : Fragment() {
         private const val M_CLEAR_LOGS = 10
         private const val M_CLEAR_DATA = 11
         private const val M_RECENT_BASE = 100
+        private const val MAX_TABS = 6
+
+        private const val RETURN_EVENTS = "(function(){try{window.dispatchEvent(new Event('focus'));" +
+            "document.dispatchEvent(new Event('visibilitychange'));window.dispatchEvent(new Event('pageshow'));}catch(e){}})()"
 
         const val MOBILE_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
         const val DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"

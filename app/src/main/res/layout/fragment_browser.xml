@@ -55,6 +55,19 @@
             android:src="@drawable/ic_refresh"
             app:tint="?attr/colorOnSurface" />
 
+        <TextView
+            android:id="@+id/btnTabs"
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:layout_marginStart="6dp"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/bg_tab_count"
+            android:contentDescription="Tabs"
+            android:gravity="center"
+            android:text="1"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
         <ImageButton
             android:id="@+id/btnMenu"
             android:layout_width="40dp"
@@ -127,6 +140,7 @@
     </LinearLayout>
 
     <FrameLayout
+        android:id="@+id/webContainer"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1">
@@ -179,61 +193,6 @@
 
             </LinearLayout>
         </ScrollView>
-
-        <!-- Popup window (window.open / ads) shown over the page -->
-        <LinearLayout
-            android:id="@+id/popupContainer"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:background="?android:attr/colorBackground"
-            android:elevation="8dp"
-            android:orientation="vertical"
-            android:visibility="gone">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="44dp"
-                android:background="?attr/colorSurfaceVariant"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingStart="12dp"
-                android:paddingEnd="4dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginEnd="8dp"
-                    android:text="Popup"
-                    android:textStyle="bold"
-                    android:textSize="12sp" />
-
-                <TextView
-                    android:id="@+id/tvPopupUrl"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:ellipsize="middle"
-                    android:singleLine="true"
-                    android:textColor="?attr/colorOnSurfaceVariant"
-                    android:textSize="11sp" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnClosePopup"
-                    style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="36dp"
-                    android:insetTop="0dp"
-                    android:insetBottom="0dp"
-                    android:text="Close ✕"
-                    android:textSize="12sp" />
-            </LinearLayout>
-
-            <FrameLayout
-                android:id="@+id/popupHost"
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1" />
-        </LinearLayout>
 
     </FrameLayout>
 

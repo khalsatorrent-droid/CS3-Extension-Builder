@@ -22,13 +22,7 @@ import java.util.concurrent.TimeUnit
  */
 class DeepCapture(private val packageName: String) {
 
-    private val client = OkHttpClient.Builder()
-        .followRedirects(false)          // WebResourceResponse cannot represent 3xx
-        .followSslRedirects(false)
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(40, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(true)
-        .build()
+    private val client get() = sharedClient
 
     class Result(val response: WebResourceResponse?, val log: NetworkLog)
 
@@ -157,6 +151,14 @@ class DeepCapture(private val packageName: String) {
     }
 
     companion object {
+        /** One connection pool shared by every browser tab. */
+        private val sharedClient: OkHttpClient = OkHttpClient.Builder()
+            .followRedirects(false)          // WebResourceResponse cannot represent 3xx
+            .followSslRedirects(false)
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(40, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .build()
         private const val MAX_BUFFER = 6L * 1024 * 1024
         private const val MAX_STORED = 400_000
     }
