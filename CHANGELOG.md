@@ -4,6 +4,11 @@ All notable changes to CS3 Extension Builder will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-10-24
+
+### Changed
+- See commit log for details
+
 ### Added
 - **Deep capture**: the browser now fetches page/API requests itself so every log has the real status code, response headers, Set-Cookie and response body (falls back to the WebView automatically for redirects, video and Cloudflare challenges)
 - Capture hook injected at document start into **every frame**, so embedded players/iframes are captured; logs fetch/XHR request + response bodies, response headers, WebSockets and `<video src>`
