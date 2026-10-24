@@ -1,6 +1,8 @@
 package com.khalsatorrent.cs3builder.network
 
 import android.graphics.Bitmap
+import android.net.Uri
+import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -8,179 +10,213 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.khalsatorrent.cs3builder.model.LogKind
 import com.khalsatorrent.cs3builder.model.NetworkLog
+import java.io.ByteArrayInputStream
 import java.util.UUID
 
+/**
+ * Captures everything the WebView loads:
+ *  - shouldInterceptRequest sees every request (and optionally runs it through [DeepCapture])
+ *  - the injected JS hook ([CaptureScripts.HOOK]) reports fetch/XHR bodies via [JSBridge]
+ *  - after each page load a rendered-DOM snapshot can be stored for selector work
+ */
 class LoggingWebViewClient(
-    private val onPageStartedCallback: ((url: String) -> Unit)? = null,
-    private val onPageFinishedCallback: ((url: String) -> Unit)? = null,
-    private val shouldBlockUrl: ((url: String) -> Boolean)? = null
+    packageName: String,
+    private val settings: Settings,
+    private val callbacks: Callbacks
 ) : WebViewClient() {
 
+    interface Settings {
+        val deepCapture: Boolean
+        val adBlock: Boolean
+        val domSnapshots: Boolean
+        val userAgent: String
+        /** True when the hook is already injected at document start for every frame. */
+        val documentStartHook: Boolean
+    }
+
+    interface Callbacks {
+        fun onPageStarted(url: String)
+        fun onPageFinished(url: String)
+    }
+
     private val gson = Gson()
+    private val deep = DeepCapture(packageName)
+    @Volatile private var currentPage: String? = null
 
-    override fun shouldInterceptRequest(
-        view: WebView?,
-        request: WebResourceRequest?
-    ): WebResourceResponse? {
-        request?.let {
-            val url = it.url.toString()
+    override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+        request ?: return null
+        val url = request.url.toString()
 
-            // Block ad/redirect domains if blocker is active
-            if (shouldBlockUrl?.invoke(url) == true) {
-                return WebResourceResponse("text/plain", "utf-8", null)
+        if (settings.adBlock && AdBlocker.isAd(url)) {
+            return WebResourceResponse("text/plain", "utf-8", 204, "No Content", emptyMap(), ByteArrayInputStream(ByteArray(0)))
+        }
+        if (LogRepository.isPaused) return null
+        val scheme = request.url.scheme?.lowercase()
+        if (scheme != "http" && scheme != "https") return null
+
+        if (settings.deepCapture && deep.canHandle(request)) {
+            val result = try { deep.fetch(request, settings.userAgent, currentPage) } catch (_: Throwable) { null }
+            if (result != null) {
+                LogRepository.addLog(result.log)
+                if (result.response != null) return result.response
+                return null
             }
+        }
 
-            val headers = it.requestHeaders?.toMutableMap() ?: mutableMapOf()
-            val isXHR = headers["X-Requested-With"]?.contains("XMLHttpRequest", true) == true
-            val log = NetworkLog(
+        val headers = (request.requestHeaders ?: emptyMap()).toMutableMap()
+        CookieManager.getInstance().getCookie(url)?.takeIf { it.isNotBlank() }?.let { headers["Cookie"] = it }
+        val accept = headers.entries.firstOrNull { it.key.equals("Accept", true) }?.value
+        val isXhr = headers.entries.any { it.key.equals("X-Requested-With", true) && it.value.equals("XMLHttpRequest", true) }
+        var kind = LogKind.classify(url, null, accept, isXhr)
+        if (kind == LogKind.OTHER && request.isForMainFrame) kind = LogKind.DOC
+
+        LogRepository.addLog(
+            NetworkLog(
                 id = UUID.randomUUID().toString(),
                 timestamp = System.currentTimeMillis(),
-                method = it.method ?: "GET",
+                method = request.method ?: "GET",
                 url = url,
                 requestHeaders = headers,
                 requestBody = null,
-                responseCode = 0,         // not available from WebView intercept
+                responseCode = 0,
                 responseHeaders = emptyMap(),
                 responseBody = null,
                 cookies = emptyList(),
                 mimeType = null,
-                isXHR = isXHR,
-                duration = 0L
+                isXHR = isXhr,
+                duration = 0L,
+                source = "webview",
+                kind = kind,
+                isMainFrame = request.isForMainFrame,
+                pageUrl = currentPage
             )
-            ProxyInterceptor.addLog(log)
-        }
-        return super.shouldInterceptRequest(view, request)
+        )
+        return null
     }
+
+    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+        val uri = request?.url ?: return false
+        val scheme = uri.scheme?.lowercase()
+        // intent://, market://, tg:// etc. would only show an error page — swallow them
+        if (scheme != "http" && scheme != "https") return true
+        if (settings.adBlock && AdBlocker.isAd(uri.toString())) return true
+        // Ad networks love redirecting the main frame on the first tap
+        if (settings.adBlock && request.isForMainFrame && !request.hasGesture() && isCrossSiteRedirect(view, uri)) return true
+        return false
+    }
+
+    private fun isCrossSiteRedirect(view: WebView?, target: Uri): Boolean {
+        val current = view?.url?.let { Uri.parse(it).host } ?: return false
+        val host = target.host ?: return false
+        return registrable(current) != registrable(host) && AdBlocker.looksLikeAdRedirect(target.toString())
+    }
+
+    private fun registrable(host: String) = host.split('.').takeLast(2).joinToString(".")
 
     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
         super.onPageStarted(view, url, favicon)
-        url?.let { onPageStartedCallback?.invoke(it) }
+        url ?: return
+        currentPage = url
+        callbacks.onPageStarted(url)
+        if (!settings.documentStartHook) view?.evaluateJavascript(CaptureScripts.HOOK, null)
     }
 
     override fun onPageFinished(view: WebView?, url: String?) {
         super.onPageFinished(view, url)
-        url?.let { onPageFinishedCallback?.invoke(it) }
-        view?.let { injectJsInterceptor(it) }
+        url ?: return
+        callbacks.onPageFinished(url)
+        view ?: return
+        // Harmless when already injected (the script guards itself)
+        view.evaluateJavascript(CaptureScripts.HOOK, null)
+        if (settings.adBlock) view.evaluateJavascript(CaptureScripts.AD_BLOCK, null)
+        if (settings.domSnapshots && !LogRepository.isPaused && url.startsWith("http")) snapshotDom(view, url)
     }
 
-    private fun injectJsInterceptor(webView: WebView) {
-        // language=JavaScript
-        val js = """
-(function() {
-    if (window.__cs3Injected) return;
-    window.__cs3Injected = true;
+    override fun onReceivedHttpError(view: WebView?, request: WebResourceRequest?, errorResponse: WebResourceResponse?) {
+        super.onReceivedHttpError(view, request, errorResponse)
+        val url = request?.url?.toString() ?: return
+        val code = errorResponse?.statusCode ?: return
+        LogRepository.updateStatus(url, code, errorResponse.responseHeaders ?: emptyMap())
+    }
 
-    /* ---- intercept fetch ---- */
-    var _fetch = window.fetch;
-    window.fetch = function(input, init) {
-        var url = typeof input === 'string' ? input : (input && input.url) || '';
-        var method = (init && init.method) ? init.method.toUpperCase() : 'GET';
-        var headers = {};
-        if (init && init.headers) {
-            try {
-                if (init.headers instanceof Headers) {
-                    init.headers.forEach(function(v, k) { headers[k] = v; });
-                } else {
-                    Object.assign(headers, init.headers);
-                }
-            } catch(e) {}
+    fun snapshotDom(view: WebView, url: String = view.url ?: "") {
+        view.evaluateJavascript(CaptureScripts.DOM_SNAPSHOT) { raw ->
+            val html = try { gson.fromJson(raw, String::class.java) } catch (_: Exception) { null }
+            if (html.isNullOrBlank()) return@evaluateJavascript
+            LogRepository.upsertDom(
+                NetworkLog(
+                    id = UUID.randomUUID().toString(),
+                    timestamp = System.currentTimeMillis(),
+                    method = "DOM",
+                    url = url,
+                    requestHeaders = emptyMap(),
+                    requestBody = null,
+                    responseCode = 0,
+                    responseHeaders = emptyMap(),
+                    responseBody = html,
+                    cookies = CookieManager.getInstance().getCookie(url)?.split(";")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList(),
+                    mimeType = "text/html",
+                    isXHR = false,
+                    duration = 0L,
+                    source = "dom",
+                    kind = LogKind.DOM,
+                    isMainFrame = true,
+                    pageUrl = url,
+                    responseSize = html.length.toLong()
+                )
+            )
         }
-        var body = (init && init.body) ? String(init.body).substring(0, 8000) : null;
-
-        var p = _fetch.apply(this, arguments);
-        p.then(function(res) {
-            var resClone = res.clone();
-            resClone.text().then(function(text) {
-                try {
-                    window.CS3Bridge.onRequestComplete(JSON.stringify({
-                        url: url, method: method, headers: headers, body: body,
-                        type: 'fetch',
-                        responseCode: res.status,
-                        responseBody: text.substring(0, 8000),
-                        contentType: res.headers.get('content-type') || ''
-                    }));
-                } catch(e) {}
-            }).catch(function() {
-                try {
-                    window.CS3Bridge.onRequestComplete(JSON.stringify({
-                        url: url, method: method, headers: headers, body: body,
-                        type: 'fetch', responseCode: res.status, responseBody: null, contentType: ''
-                    }));
-                } catch(e) {}
-            });
-        }).catch(function() {});
-        return p;
-    };
-
-    /* ---- intercept XHR ---- */
-    var _open  = XMLHttpRequest.prototype.open;
-    var _send  = XMLHttpRequest.prototype.send;
-    var _setHdr = XMLHttpRequest.prototype.setRequestHeader;
-    XMLHttpRequest.prototype.open = function(m, u) {
-        this._cs3m = m.toUpperCase(); this._cs3u = u; this._cs3h = {};
-        return _open.apply(this, arguments);
-    };
-    XMLHttpRequest.prototype.setRequestHeader = function(n, v) {
-        if (!this._cs3h) this._cs3h = {};
-        this._cs3h[n] = v;
-        return _setHdr.apply(this, arguments);
-    };
-    XMLHttpRequest.prototype.send = function(data) {
-        var self = this;
-        this.addEventListener('load', function() {
-            try {
-                window.CS3Bridge.onRequestComplete(JSON.stringify({
-                    url: self._cs3u, method: self._cs3m || 'GET',
-                    headers: self._cs3h || {}, body: data ? String(data).substring(0, 8000) : null,
-                    type: 'xhr',
-                    responseCode: self.status,
-                    responseBody: (self.responseText || '').substring(0, 8000),
-                    contentType: self.getResponseHeader('content-type') || ''
-                }));
-            } catch(e) {}
-        });
-        return _send.apply(this, arguments);
-    };
-})();
-        """.trimIndent()
-        webView.evaluateJavascript(js, null)
     }
 
+    /** Receives reports from [CaptureScripts.HOOK]. Exposed to every frame as `CS3Bridge`. */
     inner class JSBridge {
         @JavascriptInterface
         fun onRequestComplete(json: String) {
             try {
-                @Suppress("UNCHECKED_CAST")
-                val data = gson.fromJson<Map<String, Any>>(
-                    json, object : TypeToken<Map<String, Any>>() {}.type
-                )
+                val data: Map<String, Any?> = gson.fromJson(json, object : TypeToken<Map<String, Any?>>() {}.type) ?: return
                 val url = data["url"] as? String ?: return
+                if (!url.startsWith("http") && !url.startsWith("ws")) return
+                val type = data["type"] as? String ?: "xhr"
                 val method = ((data["method"] as? String) ?: "GET").uppercase()
-                @Suppress("UNCHECKED_CAST")
-                val hdrs = (data["headers"] as? Map<String, String>) ?: emptyMap()
-                val body = data["body"] as? String
-                val responseCode = (data["responseCode"] as? Number)?.toInt() ?: 0
-                val responseBody = data["responseBody"] as? String
-                val contentType = data["contentType"] as? String
-
-                val log = NetworkLog(
-                    id = UUID.randomUUID().toString(),
-                    timestamp = System.currentTimeMillis(),
-                    method = method,
-                    url = url,
-                    requestHeaders = hdrs,
-                    requestBody = body,
-                    responseCode = responseCode,
-                    responseHeaders = if (contentType != null) mapOf("Content-Type" to contentType) else emptyMap(),
-                    responseBody = responseBody,
-                    cookies = emptyList(),
-                    mimeType = contentType?.substringBefore(";")?.trim(),
-                    isXHR = true,
-                    duration = 0L
+                val reqHeaders = (data["headers"] as? Map<*, *>)?.entries
+                    ?.associate { (k, v) -> k.toString() to v.toString() } ?: emptyMap()
+                val respHeaders = (data["responseHeaders"] as? Map<*, *>)?.entries
+                    ?.associate { (k, v) -> k.toString() to v.toString() } ?: emptyMap()
+                val contentType = (data["contentType"] as? String)?.takeIf { it.isNotBlank() }
+                val mime = contentType?.substringBefore(";")?.trim()
+                val kind = when (type) {
+                    "websocket" -> LogKind.SOCKET
+                    "media" -> LogKind.classify(url).let { if (it == LogKind.OTHER) LogKind.MEDIA else it }
+                    else -> LogKind.classify(url, mime, null, true).let {
+                        if (it == LogKind.OTHER || it == LogKind.DOC) LogKind.XHR else it
+                    }
+                }
+                val body = data["responseBody"] as? String
+                LogRepository.addLog(
+                    NetworkLog(
+                        id = UUID.randomUUID().toString(),
+                        timestamp = System.currentTimeMillis(),
+                        method = method,
+                        url = url,
+                        requestHeaders = reqHeaders,
+                        requestBody = data["body"] as? String,
+                        responseCode = (data["responseCode"] as? Number)?.toInt() ?: 0,
+                        responseHeaders = respHeaders,
+                        responseBody = body,
+                        cookies = emptyList(),
+                        mimeType = mime,
+                        isXHR = type == "fetch" || type == "xhr",
+                        duration = (data["duration"] as? Number)?.toLong() ?: 0L,
+                        source = "js",
+                        kind = kind,
+                        isMainFrame = false,
+                        pageUrl = data["page"] as? String,
+                        responseSize = (data["size"] as? Number)?.toLong() ?: (body?.length?.toLong() ?: -1L)
+                    )
                 )
-                ProxyInterceptor.addLog(log)
-            } catch (_: Exception) {}
+            } catch (_: Exception) { }
         }
     }
 }

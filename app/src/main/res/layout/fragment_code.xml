@@ -1,112 +1,134 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical">
 
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/colorSurface"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="8dp"
+        android:paddingTop="6dp"
+        android:paddingEnd="8dp">
+
+        <EditText
+            android:id="@+id/etName"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/bg_url_bar"
+            android:hint="Extension name (auto)"
+            android:imeOptions="actionDone"
+            android:inputType="textCapWords"
+            android:paddingStart="14dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="8dp"
+            android:singleLine="true"
+            android:textSize="13sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnRegenerate"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:text="Regenerate" />
+    </LinearLayout>
+
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/colorSurface"
+        android:scrollbars="none">
+
+        <com.google.android.material.chip.ChipGroup
+            android:id="@+id/chipFiles"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="8dp"
+            app:selectionRequired="true"
+            app:singleLine="true"
+            app:singleSelection="true" />
+    </HorizontalScrollView>
+
+    <TextView
+        android:id="@+id/tvPath"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/colorSurface"
+        android:ellipsize="start"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="4dp"
+        android:singleLine="true"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:textSize="11sp" />
+
     <androidx.core.widget.NestedScrollView
+        android:id="@+id/scroll"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
+        android:background="@color/code_background"
         android:fillViewport="true">
 
-        <LinearLayout
+        <HorizontalScrollView
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="12dp">
+            android:layout_height="wrap_content">
 
             <TextView
-                android:id="@+id/tvSummaryLabel"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/label_log_summary"
-                android:textStyle="bold"
-                android:textSize="14sp"
-                android:paddingBottom="4dp" />
-
-            <TextView
-                android:id="@+id/tvSummary"
-                android:layout_width="match_parent"
+                android:id="@+id/tvCode"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:fontFamily="monospace"
-                android:textSize="11sp"
-                android:text="@string/placeholder_summary"
-                android:background="@color/code_background"
-                android:padding="8dp"
-                android:textColor="@color/code_text" />
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:layout_marginTop="12dp"
-                android:layout_marginBottom="12dp"
-                android:background="?attr/colorOutline" />
-
-            <TextView
-                android:id="@+id/tvCodeLabel"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/label_generated_code"
-                android:textStyle="bold"
-                android:textSize="14sp"
-                android:paddingBottom="4dp" />
-
-            <HorizontalScrollView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content">
-                <TextView
-                    android:id="@+id/tvCode"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:fontFamily="monospace"
-                    android:textSize="12sp"
-                    android:text="@string/placeholder_code"
-                    android:background="@color/code_background"
-                    android:padding="8dp"
-                    android:textColor="@color/code_text" />
-            </HorizontalScrollView>
-
-        </LinearLayout>
-
+                android:padding="10dp"
+                android:text="@string/placeholder_code"
+                android:textColor="@color/code_text"
+                android:textIsSelectable="true"
+                android:textSize="11.5sp" />
+        </HorizontalScrollView>
     </androidx.core.widget.NestedScrollView>
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:padding="8dp"
         android:background="?attr/colorSurface"
-        android:elevation="4dp">
+        android:orientation="horizontal"
+        android:padding="8dp">
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnCopy"
+            style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
             android:layout_marginEnd="4dp"
-            android:text="@string/btn_copy"
-            style="@style/Widget.Material3.Button.TonalButton" />
+            android:layout_weight="1"
+            android:text="@string/btn_copy" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnShare"
+            style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
             android:layout_marginStart="4dp"
             android:layout_marginEnd="4dp"
-            android:text="@string/btn_share_file"
-            style="@style/Widget.Material3.Button.TonalButton" />
+            android:layout_weight="1"
+            android:text="@string/btn_share_file" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnShareClaude"
+            style="@style/Widget.Material3.Button"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
             android:layout_marginStart="4dp"
-            android:text="@string/btn_share_claude"
-            style="@style/Widget.Material3.Button" />
+            android:layout_weight="1"
+            android:text="@string/btn_share_claude" />
 
     </LinearLayout>
 

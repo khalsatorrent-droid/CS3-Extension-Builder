@@ -7,6 +7,11 @@
         android:icon="@drawable/ic_browser" />
 
     <item
+        android:id="@+id/nav_apps"
+        android:title="@string/nav_apps"
+        android:icon="@drawable/ic_apps" />
+
+    <item
         android:id="@+id/nav_logs"
         android:title="@string/nav_logs"
         android:icon="@drawable/ic_logs" />

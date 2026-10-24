@@ -3,15 +3,19 @@
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <item
-        android:id="@+id/action_clear_logs"
-        android:title="@string/menu_clear_logs"
-        android:icon="@drawable/ic_delete"
-        app:showAsAction="ifRoom" />
-
-    <item
         android:id="@+id/action_generate_cs3"
         android:title="@string/menu_generate_cs3"
         android:icon="@drawable/ic_generate"
         app:showAsAction="always" />
+
+    <item
+        android:id="@+id/action_pause"
+        android:title="Pause capture"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_clear_logs"
+        android:title="@string/menu_clear_logs"
+        app:showAsAction="never" />
 
 </menu>

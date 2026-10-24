@@ -1,167 +1,185 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.coordinatorlayout.widget.CoordinatorLayout
+<LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:orientation="vertical">
 
+    <!-- URL Bar -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:orientation="vertical">
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingStart="6dp"
+        android:paddingEnd="4dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:background="?attr/colorSurface"
+        android:gravity="center_vertical">
 
-        <!-- URL Bar -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:padding="8dp"
-            android:background="?attr/colorSurface"
-            android:elevation="4dp"
-            android:gravity="center_vertical">
-
-            <ImageButton
-                android:id="@+id/btnBack"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="Back"
-                android:src="@drawable/ic_arrow_back"
-                android:tint="?attr/colorOnSurface"
-                android:layout_marginEnd="4dp" />
-
-            <EditText
-                android:id="@+id/etUrl"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginEnd="6dp"
-                android:hint="@string/hint_enter_url"
-                android:inputType="textUri"
-                android:imeOptions="actionGo"
-                android:singleLine="true"
-                android:textSize="13sp"
-                android:background="@drawable/bg_url_bar"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:paddingTop="8dp"
-                android:paddingBottom="8dp" />
-
-            <!-- Ad Block toggle -->
-            <ImageButton
-                android:id="@+id/btnAdBlock"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="Block ads/redirects"
-                android:src="@drawable/ic_block"
-                android:tint="?attr/colorOnSurfaceVariant"
-                android:layout_marginEnd="2dp" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnGo"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/btn_go"
-                android:minWidth="56dp"
-                style="@style/Widget.Material3.Button" />
-
-        </LinearLayout>
-
-        <!-- Ad block status chip (shown when enabled) -->
-        <com.google.android.material.chip.Chip
-            android:id="@+id/chipAdBlock"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="10dp"
-            android:layout_marginBottom="4dp"
-            android:text="🛡 Ad/Redirect Block ON"
-            android:textSize="11sp"
-            android:visibility="gone"
-            app:chipBackgroundColor="#CC22AA44"
-            app:closeIconVisible="true"
-            app:closeIconTint="@android:color/white"
-            android:textColor="@android:color/white" />
-
-        <!-- Progress bar -->
-        <ProgressBar
-            android:id="@+id/progressBar"
-            android:layout_width="match_parent"
-            android:layout_height="4dp"
-            android:visibility="gone"
-            android:indeterminate="true"
-            style="@style/Widget.Material3.LinearProgressIndicator" />
-
-        <!-- Capture status bar -->
-        <LinearLayout
-            android:id="@+id/captureBar"
-            android:layout_width="match_parent"
+        <ImageButton
+            android:id="@+id/btnBack"
+            android:layout_width="40dp"
             android:layout_height="40dp"
-            android:orientation="horizontal"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Back"
+            android:src="@drawable/ic_arrow_back"
+            app:tint="?attr/colorOnSurface" />
+
+        <EditText
+            android:id="@+id/etUrl"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="2dp"
+            android:layout_marginEnd="4dp"
+            android:hint="@string/hint_enter_url"
+            android:inputType="textUri"
+            android:imeOptions="actionGo"
+            android:selectAllOnFocus="true"
+            android:singleLine="true"
+            android:textSize="13sp"
+            android:background="@drawable/bg_url_bar"
             android:paddingStart="12dp"
-            android:paddingEnd="4dp"
-            android:gravity="center_vertical"
-            android:background="@color/capture_bar_bg">
+            android:paddingEnd="12dp"
+            android:paddingTop="9dp"
+            android:paddingBottom="9dp" />
 
-            <View
-                android:id="@+id/captureIndicator"
-                android:layout_width="8dp"
-                android:layout_height="8dp"
-                android:background="@drawable/bg_indicator_dot"
-                android:layout_marginEnd="6dp" />
+        <ImageButton
+            android:id="@+id/btnReload"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Reload"
+            android:src="@drawable/ic_refresh"
+            app:tint="?attr/colorOnSurface" />
 
-            <TextView
-                android:id="@+id/tvCaptureStatus"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Capturing traffic…"
-                android:textSize="11sp"
-                android:textColor="@color/white"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/tvLogCount"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="0 requests"
-                android:textSize="11sp"
-                android:textColor="@color/white"
-                android:layout_marginEnd="6dp" />
-
-            <!-- Quick access: jump to logs and share -->
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnViewLogs"
-                android:layout_width="wrap_content"
-                android:layout_height="32dp"
-                android:text="Logs →"
-                android:textSize="11sp"
-                android:paddingStart="10dp"
-                android:paddingEnd="10dp"
-                android:insetTop="0dp"
-                android:insetBottom="0dp"
-                style="@style/Widget.Material3.Button.TonalButton" />
-
-        </LinearLayout>
-
-        <!-- WebView -->
-        <WebView
-            android:id="@+id/webView"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1" />
+        <ImageButton
+            android:id="@+id/btnMenu"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Browser options"
+            android:src="@drawable/ic_more"
+            app:tint="?attr/colorOnSurface" />
 
     </LinearLayout>
 
-    <!-- Clear FAB -->
-    <com.google.android.material.floatingactionbutton.FloatingActionButton
-        android:id="@+id/fabClear"
-        android:layout_width="wrap_content"
+    <com.google.android.material.progressindicator.LinearProgressIndicator
+        android:id="@+id/progressBar"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom|end"
-        android:layout_margin="16dp"
-        android:contentDescription="@string/fab_clear_logs"
-        app:srcCompat="@drawable/ic_delete"
-        app:backgroundTint="@color/method_delete" />
+        android:max="100"
+        android:visibility="invisible"
+        app:trackThickness="3dp" />
 
-</androidx.coordinatorlayout.widget.CoordinatorLayout>
+    <!-- Capture status bar -->
+    <LinearLayout
+        android:id="@+id/captureBar"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingEnd="4dp"
+        android:gravity="center_vertical"
+        android:background="@color/capture_bar_bg">
+
+        <View
+            android:id="@+id/captureIndicator"
+            android:layout_width="8dp"
+            android:layout_height="8dp"
+            android:background="@drawable/bg_indicator_dot"
+            android:layout_marginEnd="8dp" />
+
+        <TextView
+            android:id="@+id/tvCaptureStatus"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="Ready — browse to start capturing"
+            android:textSize="11sp"
+            android:textColor="@color/white"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvModes"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="6dp"
+            android:textSize="10sp"
+            android:textColor="#CCFFFFFF" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnViewLogs"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:text="Logs →"
+            android:textSize="11sp" />
+
+    </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <WebView
+            android:id="@+id/webView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <!-- Start page shown before anything is loaded -->
+        <ScrollView
+            android:id="@+id/startPanel"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="?android:attr/colorBackground">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Capture a site"
+                    android:textAppearance="?attr/textAppearanceHeadlineSmall" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/start_steps"
+                    android:textAppearance="?attr/textAppearanceBodyMedium"
+                    android:lineSpacingMultiplier="1.25" />
+
+                <TextView
+                    android:id="@+id/tvRecentLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:text="Recent sites"
+                    android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+                <com.google.android.material.chip.ChipGroup
+                    android:id="@+id/recentChips"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp" />
+
+            </LinearLayout>
+        </ScrollView>
+
+    </FrameLayout>
+
+</LinearLayout>
