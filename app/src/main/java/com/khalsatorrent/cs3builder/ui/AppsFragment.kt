@@ -41,10 +41,11 @@ class AppsFragment : Fragment() {
 
     data class Tool(val name: String, val packages: List<String>, val exportsHar: Boolean, val download: String)
 
+    // PCAPdroid first: it captures per-app and needs no system certificate, so banking apps are safe.
     private val tools = listOf(
+        Tool("PCAPdroid", listOf("com.emanuelef.remote_capture"), false, "https://github.com/emanuele-f/PCAPdroid/releases"),
         Tool("Reqable", listOf("com.reqable.android"), true, "https://reqable.com/en-US/download/"),
-        Tool("HttpCanary", listOf("com.guoshi.httpcanary", "com.guoshi.httpcanary.premium"), true, "https://github.com/MegatronKing/HttpCanary"),
-        Tool("PCAPdroid", listOf("com.emanuelef.remote_capture"), false, "https://github.com/emanuele-f/PCAPdroid/releases")
+        Tool("HttpCanary", listOf("com.guoshi.httpcanary", "com.guoshi.httpcanary.premium"), true, "https://github.com/MegatronKing/HttpCanary")
     )
 
     private var apps: List<AppEntry> = emptyList()
@@ -99,7 +100,7 @@ class AppsFragment : Fragment() {
             b.btnTool.text = "Open ${installed.first.name}"
             b.btnTool.setOnClickListener { launch(installed.second) }
         } else {
-            b.btnTool.text = "Get Reqable"
+            b.btnTool.text = "Get PCAPdroid"
             b.btnTool.setOnClickListener { openUrl(tools.first().download) }
         }
     }
@@ -142,24 +143,29 @@ class AppsFragment : Fragment() {
     private fun showAppActions(app: AppEntry) {
         val ctx = requireContext()
         val tool = installedTool()
+        val hasPcapdroid = tool?.first?.name == "PCAPdroid"
         val steps = buildString {
-            appendLine("1. Start capturing ${app.label} in ${tool?.first?.name ?: "a capture tool (Reqable recommended)"}.")
-            appendLine("   Install its CA certificate when it asks — needed to see HTTPS requests.")
+            appendLine("No-certificate route (safe for banking apps — PCAPdroid only touches ${app.label}):")
+            appendLine("1. Capture only ${app.label} in PCAPdroid with decryption OFF. No certificate is installed, so nothing else on your phone is affected.")
             appendLine("2. Use ${app.label}: open the home screen, search, open a title, press play.")
-            appendLine("3. Stop the capture and export it as HAR (in Reqable: select requests → Share/Export → HAR).")
-            appendLine("4. Come back and tap Import HAR — the requests appear in Logs and you can Generate.")
+            appendLine("3. Stop, then Export as PCAP/PCAPNG and tap Import here.")
+            appendLine("   → You get every hostname/endpoint the app uses (HTTPS bodies stay encrypted without a cert).")
+            appendLine("4. Open those hosts in the Browser tab to capture the actual API responses — most streaming apps use the same API as their website, and the browser needs no certificate.")
             appendLine()
-            append("Note: apps that pin certificates or ignore user CAs will show connections but not their contents. In that case, try the app's website in the Browser tab — most streaming apps use the same API.")
+            append("Full bodies from the app itself need TLS decryption, which needs a certificate. PCAPdroid installs its cert per-app (not system-wide), so even then your banking apps are untouched — but many apps ignore user certs, which is why the Browser route above is usually the real answer.")
         }
         val options = mutableListOf<Pair<String, () -> Unit>>()
         fun opt(label: String, action: () -> Unit) = label to action
-        if (tool != null && tool.first.name == "PCAPdroid") {
-            options += opt("Capture only ${app.label} in PCAPdroid") { startPcapdroid(tool.second, app.pkg) }
+        if (hasPcapdroid) {
+            options += opt("Capture ${app.label} — no cert (hostnames)") { startPcapdroid(tool!!.second, app.pkg, decrypt = false) }
+            options += opt("Capture ${app.label} — decrypt (needs cert)") { startPcapdroid(tool.second, app.pkg, decrypt = true) }
+        } else {
+            options += opt("Get PCAPdroid (no system cert needed)") { openUrl(tools.first { it.name == "PCAPdroid" }.download) }
         }
         if (tool != null) options += opt("Open ${tool.first.name}") { launch(tool.second) }
-        else options += opt("Get Reqable (HAR export)") { openUrl(tools.first().download) }
         options += opt("Launch ${app.label}") { launch(app.pkg) }
-        options += opt("Import HAR into Logs") { (activity as? MainActivity)?.importIntoLogs() }
+        options += opt("Import capture into Logs") { (activity as? MainActivity)?.importIntoLogs() }
+        options += opt("Capture its website in Browser") { (activity as? MainActivity)?.navigateToBrowser(null) }
         options += opt("App info") { openAppInfo(app.pkg) }
 
         AlertDialog.Builder(ctx)
@@ -176,18 +182,26 @@ class AppsFragment : Fragment() {
             .show()
     }
 
-    /** PCAPdroid's public API: capture a single app with TLS decryption (it asks the user to confirm). */
-    private fun startPcapdroid(pcapPkg: String, target: String) {
+    /**
+     * PCAPdroid's public API: capture a single app. With [decrypt] false no certificate is used, so
+     * nothing else on the phone is affected; the capture is dumped to a file to export and import here.
+     */
+    private fun startPcapdroid(pcapPkg: String, target: String, decrypt: Boolean) {
         val intent = Intent().apply {
             component = ComponentName(pcapPkg, "com.emanuelef.remote_capture.activities.CaptureCtrl")
             putExtra("action", "start")
             putExtra("app_filter", target)
-            putExtra("pcap_dump_mode", "none")
-            putExtra("tls_decryption", true)
+            putExtra("pcap_dump_mode", "pcap_file")
+            putExtra("pcap_name", "cs3_${target.substringAfterLast('.')}.pcap")
+            putExtra("tls_decryption", decrypt)
         }
         try {
             startActivity(intent)
-            Toast.makeText(requireContext(), "Confirm in PCAPdroid, then use the app. Decrypted requests appear in PCAPdroid's Connections tab.", Toast.LENGTH_LONG).show()
+            val msg = if (decrypt)
+                "Confirm in PCAPdroid (installs its per-app cert — banking apps unaffected). Use the app, stop, then export the PCAP and Import it here."
+            else
+                "Confirm in PCAPdroid — no certificate needed. Use the app, stop, then export the PCAP and Import it here."
+            Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             Toast.makeText(requireContext(), "Could not start PCAPdroid: ${e.message}", Toast.LENGTH_LONG).show()
         }
