@@ -26,6 +26,7 @@ import com.khalsatorrent.cs3builder.codegen.SiteAnalyzer
 import com.khalsatorrent.cs3builder.databinding.FragmentLogBinding
 import com.khalsatorrent.cs3builder.export.LogExporter
 import com.khalsatorrent.cs3builder.export.LogImporter
+import com.khalsatorrent.cs3builder.export.PcapImporter
 import com.khalsatorrent.cs3builder.model.LogKind
 import com.khalsatorrent.cs3builder.model.NetworkLog
 import com.khalsatorrent.cs3builder.network.LogRepository
@@ -218,9 +219,14 @@ class LogFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
-                    val text = ctx.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                         ?: throw IllegalArgumentException("Could not read the file")
-                    LogImporter.import(text, "import")
+                    if (PcapImporter.isPcap(bytes)) {
+                        val r = PcapImporter.parse(bytes)
+                        LogImporter.Result(r.logs, r.format)
+                    } else {
+                        LogImporter.import(bytes.toString(Charsets.UTF_8), "import")
+                    }
                 }
                 if (result.logs.isEmpty()) {
                     Toast.makeText(ctx, "No requests found in that file", Toast.LENGTH_LONG).show()
@@ -234,7 +240,7 @@ class LogFragment : Fragment() {
             } catch (e: Exception) {
                 AlertDialog.Builder(requireContext())
                     .setTitle("Import failed")
-                    .setMessage("${e.message}\n\nSupported: .har exports (Reqable, HttpCanary, PCAPdroid, Chrome DevTools, Charles, mitmproxy) and session .json files from this app.")
+                    .setMessage("${e.message}\n\nSupported: .pcap / .pcapng (PCAPdroid, tcpdump, Wireshark), .har exports (Reqable, HttpCanary, Chrome DevTools, Charles, mitmproxy) and session .json files from this app.")
                     .setPositiveButton("OK", null)
                     .show()
             }

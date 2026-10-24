@@ -4,6 +4,10 @@ All notable changes to CS3 Extension Builder will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Import **.pcap / .pcapng** captures (PCAPdroid, tcpdump, Wireshark): parses IPv4/IPv6, TCP/UDP, extracts HTTPS hostnames from the TLS ClientHello (SNI), full plaintext HTTP requests/responses and DNS lookups into Logs. Lets you capture an app with **no certificate** (PCAPdroid, decryption off, per-app — banking apps untouched) and still learn its endpoints.
+- Apps tab rewritten around the no-system-certificate flow: PCAPdroid first, one-tap capture of a single app (decrypt off or on), clear guidance that the Browser tab gets the response bodies without any certificate
+
 ## [2.0.3] - 2026-10-24
 
 ### Changed

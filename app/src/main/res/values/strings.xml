@@ -8,7 +8,7 @@
     <string name="nav_code">Code</string>
     <string name="nav_apps">Apps</string>
     <string name="start_steps">1. Open the site\'s home page.\n2. Search for a title.\n3. Open a movie or show page.\n4. Press play and let the video start.\n5. Tap Generate on the Logs tab.\n\nDeep capture (on by default, ⋮ menu) records status codes, headers, cookies and response bodies. Turn it off if a site misbehaves.</string>
-    <string name="apps_howto">Android can\'t run another APK inside this app, but you can record any app\'s traffic with a capture tool and import it here. Pick an app below for step-by-step instructions, then Import the HAR file — it shows up in Logs and works with Generate just like browser traffic.</string>
+    <string name="apps_howto">Android can\'t safely run another app\'s APK inside this one, and you don\'t need to. Record the app\'s traffic with PCAPdroid (per-app, no system certificate — your banking apps are never touched), export a PCAP, and Import it here to get the app\'s endpoints. Then open those hosts in the Browser tab to capture the real API — most streaming apps share their website\'s API.</string>
 
     <!-- Browser -->
     <string name="hint_enter_url">Enter URL or search…</string>
