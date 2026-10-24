@@ -4,6 +4,9 @@ All notable changes to CS3 Extension Builder will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Browser tabs: popups (`window.open`, `target=_blank`) now open as real new tabs while the opener page stays alive with its state, so "watch N ads to unlock" players keep counting. Back closes the popup tab and returns to the page; the tab counter next to the URL bar switches between tabs
+
 ## [2.0.2] - 2026-10-24
 
 ### Changed
