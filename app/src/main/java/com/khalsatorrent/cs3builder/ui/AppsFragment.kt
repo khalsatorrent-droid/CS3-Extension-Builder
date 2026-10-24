@@ -156,9 +156,10 @@ class AppsFragment : Fragment() {
         }
         val options = mutableListOf<Pair<String, () -> Unit>>()
         fun opt(label: String, action: () -> Unit) = label to action
-        if (hasPcapdroid) {
-            options += opt("Capture ${app.label} — no cert (hostnames)") { startPcapdroid(tool!!.second, app.pkg, decrypt = false) }
-            options += opt("Capture ${app.label} — decrypt (needs cert)") { startPcapdroid(tool.second, app.pkg, decrypt = true) }
+        if (hasPcapdroid && tool != null) {
+            val pcapPkg = tool.second
+            options += opt("Capture ${app.label} — no cert (hostnames)") { startPcapdroid(pcapPkg, app.pkg, decrypt = false) }
+            options += opt("Capture ${app.label} — decrypt (needs cert)") { startPcapdroid(pcapPkg, app.pkg, decrypt = true) }
         } else {
             options += opt("Get PCAPdroid (no system cert needed)") { openUrl(tools.first { it.name == "PCAPdroid" }.download) }
         }
