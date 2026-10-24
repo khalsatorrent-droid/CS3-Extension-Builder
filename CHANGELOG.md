@@ -4,6 +4,11 @@ All notable changes to CS3 Extension Builder will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-10-24
+
+### Changed
+- See commit log for details
+
 ### Fixed
 - Sites that open ads with `window.open` ("watch N ads to unlock the stream") no longer think a popup blocker is on: popups now open in a closable overlay window, and their traffic is captured too
 
