@@ -133,11 +133,12 @@ class BrowserFragment : Fragment() {
             override fun onShowCustomView(view: View?, callback: CustomViewCallback?) = enterFullscreen(view, callback)
             override fun onHideCustomView() = exitFullscreen()
             // window.open / target=_blank: load in the same view unless the ad blocker is on
+            // window.open / target=_blank: open a real popup window in an overlay. Ad-gated players
+            // ("watch 5 ads to unlock") check that the popup actually opened.
             override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean {
-                if (prefs.adBlock || !isUserGesture || view == null) return false
-                val href = view.hitTestResult.extra
-                if (href != null && href.startsWith("http")) { view.loadUrl(href); }
-                return false
+                if (resultMsg == null) return false
+                if (prefs.adBlock && !isUserGesture) return false
+                return openPopup(resultMsg)
             }
         }
 
@@ -152,7 +153,7 @@ class BrowserFragment : Fragment() {
             displayZoomControls = false
             mediaPlaybackRequiresUserGesture = false
             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-            javaScriptCanOpenWindowsAutomatically = false
+            javaScriptCanOpenWindowsAutomatically = true
             setSupportMultipleWindows(true)
             userAgentString = currentUserAgent()
         }
@@ -197,6 +198,7 @@ class BrowserFragment : Fragment() {
         }
         binding.btnViewLogs.setOnClickListener { (activity as? MainActivity)?.navigateToLogs() }
         binding.btnMenu.setOnClickListener { showMenu(it) }
+        binding.btnClosePopup.setOnClickListener { closePopup() }
     }
 
     private fun showMenu(anchor: View) {
@@ -332,6 +334,63 @@ class BrowserFragment : Fragment() {
         b.webView.loadUrl(url)
     }
 
+    // ---- popup windows ----
+
+    private var popupWebView: WebView? = null
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun openPopup(resultMsg: android.os.Message): Boolean {
+        val b = _binding ?: return false
+        closePopup()
+        val popup = WebView(requireContext())
+        popup.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            databaseEnabled = true
+            loadWithOverviewMode = true
+            useWideViewPort = true
+            mediaPlaybackRequiresUserGesture = false
+            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            javaScriptCanOpenWindowsAutomatically = false
+            setSupportMultipleWindows(false)
+            userAgentString = currentUserAgent()
+        }
+        CookieManager.getInstance().setAcceptThirdPartyCookies(popup, true)
+        popup.webViewClient = object : android.webkit.WebViewClient() {
+            override fun shouldInterceptRequest(view: WebView?, request: android.webkit.WebResourceRequest?) =
+                loggingClient.shouldInterceptRequest(view, request)
+            override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean {
+                val scheme = request?.url?.scheme?.lowercase()
+                return scheme != "http" && scheme != "https" // swallow intent:// / market:// links
+            }
+            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                _binding?.tvPopupUrl?.text = url ?: ""
+            }
+        }
+        popup.webChromeClient = object : WebChromeClient() {
+            override fun onCloseWindow(window: WebView?) = closePopup()
+        }
+        b.popupHost.addView(popup, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        b.tvPopupUrl.text = "Opening popup…"
+        b.popupContainer.visibility = View.VISIBLE
+        popupWebView = popup
+        val transport = resultMsg.obj as? WebView.WebViewTransport ?: run { closePopup(); return false }
+        transport.webView = popup
+        resultMsg.sendToTarget()
+        return true
+    }
+
+    private fun closePopup() {
+        val popup = popupWebView ?: return
+        popupWebView = null
+        _binding?.let { b ->
+            b.popupHost.removeView(popup)
+            b.popupContainer.visibility = View.GONE
+        }
+        popup.stopLoading()
+        popup.destroy()
+    }
+
     // ---- fullscreen video ----
 
     private fun enterFullscreen(view: View?, callback: WebChromeClient.CustomViewCallback?) {
@@ -366,6 +425,11 @@ class BrowserFragment : Fragment() {
     /** Returns true when the back press was consumed by the browser. */
     fun handleBack(): Boolean {
         if (customView != null) { exitFullscreen(); return true }
+        if (popupWebView != null) {
+            val p = popupWebView!!
+            if (p.canGoBack()) p.goBack() else closePopup()
+            return true
+        }
         val wv = _binding?.webView ?: return false
         if (wv.canGoBack()) { wv.goBack(); return true }
         return false
@@ -379,6 +443,7 @@ class BrowserFragment : Fragment() {
     }
 
     override fun onDestroyView() {
+        closePopup()
         exitFullscreen()
         _binding?.webView?.apply { stopLoading(); destroy() }
         super.onDestroyView()
