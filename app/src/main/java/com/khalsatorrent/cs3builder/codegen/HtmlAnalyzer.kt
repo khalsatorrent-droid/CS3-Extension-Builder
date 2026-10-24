@@ -162,7 +162,7 @@ object HtmlAnalyzer {
         var serverSel: String? = null
         var serverAttr: String? = null
         for (a in serverAttrs) {
-            val els = doc.select("[$a]").filter { it.tagName() != "img" && it.tagName() != "iframe" && it.tagName() != "script" }
+            val els = doc.select("[$a]").toList().filter { it.tagName() != "img" && it.tagName() != "iframe" && it.tagName() != "script" }
             if (els.size >= 1) {
                 val sig = signature(els.first()) ?: continue
                 serverSel = "$sig[$a]"; serverAttr = a; break
