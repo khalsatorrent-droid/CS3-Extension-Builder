@@ -117,6 +117,13 @@ class BrowserFragment : Fragment() {
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true) // embedded players need these
 
         webView.webViewClient = loggingClient
+        // Requests made by service workers bypass WebViewClient — log them too
+        try {
+            android.webkit.ServiceWorkerController.getInstance().setServiceWorkerClient(object : android.webkit.ServiceWorkerClient() {
+                override fun shouldInterceptRequest(request: android.webkit.WebResourceRequest): android.webkit.WebResourceResponse? =
+                    loggingClient.shouldInterceptRequest(null, request)
+            })
+        } catch (_: Throwable) { }
         webView.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                 val b = _binding ?: return

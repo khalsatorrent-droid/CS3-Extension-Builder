@@ -110,10 +110,16 @@ class DeepCapture(private val packageName: String) {
             responseSize = size
         )
 
+        // Cloudflare & co. fingerprint OkHttp differently from Chrome: when a request gets challenged,
+        // record it but let the WebView make the real request so the user can pass the challenge.
+        val challenged = (code == 403 || code == 503 || code == 429) &&
+            (response.header("cf-mitigated") != null || response.header("Server")?.contains("cloudflare", true) == true ||
+                response.header("Server")?.contains("ddos-guard", true) == true)
+
         // Redirects cannot be handed back to the WebView: record them and let the WebView redo it.
-        if (code in 300..399 || code < 100 || code > 599) {
+        if (challenged || code in 300..399 || code < 100 || code > 599) {
             response.close()
-            return Result(null, baseLog(null, -1))
+            return Result(null, baseLog(if (challenged) "[bot challenge for OkHttp — the WebView made this request itself]" else null, -1))
         }
 
         val body = response.body ?: run {
