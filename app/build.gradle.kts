@@ -71,4 +71,10 @@ dependencies {
     implementation("androidx.webkit:webkit:1.10.0")
     // HTML analysis for selector detection in the code generator
     implementation("org.jsoup:jsoup:1.17.2")
+
+    // Plays captured media urls (HLS and progressive). The WebView cannot decode HLS at all,
+    // so without this a .m3u8 stream is unplayable inside the app.
+    implementation("androidx.media3:media3-exoplayer:1.4.1")
+    implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
+    implementation("androidx.media3:media3-ui:1.4.1")
 }

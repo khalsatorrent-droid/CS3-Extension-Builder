@@ -11,7 +11,10 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.badge.BadgeDrawable
 import com.khalsatorrent.cs3builder.databinding.ActivityMainBinding
+import com.khalsatorrent.cs3builder.export.LogExporter
+import com.khalsatorrent.cs3builder.network.DeepCapture
 import com.khalsatorrent.cs3builder.network.LogRepository
+import com.khalsatorrent.cs3builder.utils.Prefs
 import com.khalsatorrent.cs3builder.ui.AppsFragment
 import com.khalsatorrent.cs3builder.ui.BrowserFragment
 import com.khalsatorrent.cs3builder.ui.CodeFragment
@@ -36,6 +39,11 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
+
+        // Apply the body-size setting before anything is captured or exported.
+        val prefs = Prefs(this)
+        DeepCapture.storeFullBodies = prefs.fullBodies
+        LogExporter.fullBodies = prefs.fullBodies
 
         ViewCompat.setOnApplyWindowInsetsListener(binding.appBarLayout) { v, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())

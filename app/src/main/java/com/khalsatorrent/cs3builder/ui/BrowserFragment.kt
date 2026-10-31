@@ -2,7 +2,9 @@ package com.khalsatorrent.cs3builder.ui
 
 import android.annotation.SuppressLint
 import android.app.AlertDialog
+import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -28,7 +30,9 @@ import com.khalsatorrent.cs3builder.MainActivity
 import com.khalsatorrent.cs3builder.R
 import com.khalsatorrent.cs3builder.databinding.FragmentBrowserBinding
 import com.khalsatorrent.cs3builder.model.LogKind
+import com.khalsatorrent.cs3builder.export.LogExporter
 import com.khalsatorrent.cs3builder.model.NetworkLog
+import com.khalsatorrent.cs3builder.network.DeepCapture
 import com.khalsatorrent.cs3builder.network.CaptureScripts
 import com.khalsatorrent.cs3builder.network.LogRepository
 import com.khalsatorrent.cs3builder.network.LoggingWebViewClient
@@ -64,6 +68,7 @@ class BrowserFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         prefs = Prefs(requireContext())
+        applyBodyLimits()
         setupWebView()
         setupControls()
         observeLogs()
@@ -103,6 +108,7 @@ class BrowserFragment : Fragment() {
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun configureTab(webView: WebView) {
+        attachLinkMenu(webView)
         val client = LoggingWebViewClient(
             packageName = requireContext().packageName,
             settings = object : LoggingWebViewClient.Settings {
@@ -228,11 +234,14 @@ class BrowserFragment : Fragment() {
         m.add(0, M_ADS, 2, "Block ads & popups").setCheckable(true).isChecked = prefs.adBlock
         m.add(0, M_DESKTOP, 3, "Desktop site").setCheckable(true).isChecked = prefs.desktopMode
         m.add(0, M_PAUSE, 4, "Pause capture").setCheckable(true).isChecked = LogRepository.isPaused
+        m.add(0, M_FULL_BODIES, 5, "Full response bodies (no truncation)")
+            .setCheckable(true).isChecked = prefs.fullBodies
         val recents = prefs.recentSites
         if (recents.isNotEmpty()) {
             val sub = m.addSubMenu(1, M_RECENT, 5, "Recent sites")
             recents.forEachIndexed { i, site -> sub.add(2, M_RECENT_BASE + i, i, site) }
         }
+        m.add(1, M_PLAY_MEDIA, 5, "▶ Play captured media")
         m.add(1, M_SNAPSHOT, 6, "Snapshot this page now")
         m.add(1, M_COPY_URL, 7, "Copy page URL")
         m.add(1, M_COOKIES, 8, "Show cookies for this site")
@@ -250,6 +259,15 @@ class BrowserFragment : Fragment() {
                     tabs.forEach { it.settings.userAgentString = currentUserAgent() }
                     updateModes(); web.reload() }
                 M_PAUSE -> LogRepository.setPaused(!LogRepository.isPaused)
+                M_FULL_BODIES -> {
+                    prefs.fullBodies = !prefs.fullBodies
+                    applyBodyLimits()
+                    toast(
+                        if (prefs.fullBodies) "Full bodies on - reload the page to capture whole responses"
+                        else "Full bodies off - responses are capped again"
+                    )
+                }
+                M_PLAY_MEDIA -> playCapturedMedia()
                 M_SNAPSHOT -> { val url = web.url
                     if (url != null) { loggingClient.snapshotDom(web, url); toast("Page HTML saved to Logs") } }
                 M_COPY_URL -> web.url?.let { ShareUtils.copyToClipboard(requireContext(), it, "URL") }
@@ -263,6 +281,121 @@ class BrowserFragment : Fragment() {
             true
         }
         popup.show()
+    }
+
+    /** Keeps DeepCapture and the exporter in step with the setting. */
+    private fun applyBodyLimits() {
+        DeepCapture.storeFullBodies = prefs.fullBodies
+        LogExporter.fullBodies = prefs.fullBodies
+    }
+
+    /**
+     * Long-pressing a link offers what a normal browser does. The WebView's own long-press only
+     * selects text, so without this the link url is never reachable.
+     */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun attachLinkMenu(webView: WebView) {
+        webView.setOnLongClickListener { msg ->
+            val result = msg.data as? WebView.HitTestResult ?: return@setOnLongClickListener false
+            val href = result.extra ?: return@setOnLongClickListener false
+            if (!href.startsWith("http")) return@setOnLongClickListener false
+            if (result.type == WebView.HitTestResult.SRC_ANCHOR_TYPE ||
+                result.type == WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE
+            ) {
+                showLinkMenu(href)
+                true
+            } else {
+                false
+            }
+        }
+    }
+
+    private fun looksPlayable(url: String): Boolean {
+        val u = url.lowercase()
+        return u.contains(".m3u8") || u.contains(".mpd") || u.contains(".mp4") || u.contains(".mkv")
+    }
+
+    private fun showLinkMenu(url: String) {
+        val items = mutableListOf<String>()
+        if (looksPlayable(url)) items += "▶ Play in player"
+        items += "Open in a new tab"
+        items += "Open in a background tab"
+        items += "Copy link"
+        items += "Open in another browser"
+
+        AlertDialog.Builder(requireContext())
+            .setTitle(url.take(90))
+            .setItems(items.toTypedArray()) { _, index ->
+                when (items[index]) {
+                    "▶ Play in player" -> PlayerActivity.start(
+                        requireContext(), url, web.url,
+                        mapOf("Referer" to (web.url ?: ""))
+                    )
+                    "Open in a new tab" -> openUrlInNewTab(url, switch = true)
+                    "Open in a background tab" -> openUrlInNewTab(url, switch = false)
+                    "Copy link" -> ShareUtils.copyToClipboard(requireContext(), url, "Link")
+                    "Open in another browser" -> runCatching {
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                    }.onFailure { toast("No app can open this link") }
+                }
+            }
+            .show()
+    }
+
+    private fun openUrlInNewTab(url: String, switch: Boolean) {
+        val b = _binding ?: return
+        if (tabs.size >= MAX_TABS) closeTab(tabs[1])
+        val tab = WebView(requireContext())
+        configureTab(tab)
+        tab.settings.setSupportMultipleWindows(true)
+        b.webContainer.addView(
+            tab,
+            b.webContainer.indexOfChild(b.startPanel),
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        )
+        tabs += tab
+        tabOpener[tab] = web
+        if (switch) switchTo(tabs.lastIndex)
+        tab.loadUrl(url)
+        updateTabButton()
+        toast(if (switch) "Opened in a new tab" else "Opened in a background tab")
+    }
+
+    /** Everything playable captured so far, newest first - this is how a stream gets watched. */
+    private fun playCapturedMedia() {
+        val page = web.url
+        val media = LogRepository.getSnapshot()
+            .filter { LogDetailSheet.isPlayable(it) && it.responseCode != 403 }
+            .sortedByDescending { it.timestamp }
+            .distinctBy { it.url }
+            .let { all ->
+                val here = all.filter { page != null && it.pageUrl == page }
+                (here + all.filterNot { l -> here.any { it.url == l.url } }).take(20)
+            }
+
+        if (media.isEmpty()) {
+            toast("No media captured yet - press play on the page first, then try again")
+            return
+        }
+
+        val labels = media.map { l ->
+            val mark = if (page != null && l.pageUrl == page) "• " else "  "
+            mark + "${LogKind.label(l.kind)} · " + l.url.take(70)
+        }.toTypedArray()
+
+        AlertDialog.Builder(requireContext())
+            .setTitle("Play captured media")
+            .setItems(labels) { _, i ->
+                val log = media[i]
+                PlayerActivity.start(
+                    requireContext(), log.url, log.pageUrl,
+                    log.requestHeaders.filterKeys {
+                        it.equals("Referer", true) || it.equals("Origin", true) || it.equals("User-Agent", true)
+                    }
+                )
+            }
+            .setNegativeButton("Close", null)
+            .show()
     }
 
     private fun showCookies() {
@@ -492,6 +625,8 @@ class BrowserFragment : Fragment() {
         private const val M_COOKIES = 9
         private const val M_CLEAR_LOGS = 10
         private const val M_CLEAR_DATA = 11
+        private const val M_FULL_BODIES = 12
+        private const val M_PLAY_MEDIA = 13
         private const val M_RECENT_BASE = 100
         private const val MAX_TABS = 6
 

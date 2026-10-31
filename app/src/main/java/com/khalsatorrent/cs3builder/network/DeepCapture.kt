@@ -128,8 +128,9 @@ class DeepCapture(private val packageName: String) {
         val reason = response.message.filter { it in ' '..'~' }.ifBlank { "OK" }
         val textual = isTextual(mime, url)
         val declaredLength = body.contentLength()
+        val maxBuffer = if (storeFullBodies) FULL_MAX_BUFFER else MAX_BUFFER
 
-        if (!textual || declaredLength > MAX_BUFFER) {
+        if (!textual || declaredLength > maxBuffer) {
             // Stream straight through without buffering (large or binary content)
             val wr = WebResourceResponse(mime ?: "application/octet-stream", charsetName, code, reason, passHeaders, body.byteStream())
             return Result(wr, baseLog("[${mime ?: "binary"} — ${if (declaredLength >= 0) "$declaredLength bytes" else "streamed"}, body not stored]", declaredLength))
@@ -138,7 +139,12 @@ class DeepCapture(private val packageName: String) {
         val bytes = try { body.bytes() } catch (_: Exception) { response.close(); return null }
         val charset = try { charsetName?.let { Charset.forName(it) } ?: Charsets.UTF_8 } catch (_: Exception) { Charsets.UTF_8 }
         val text = String(bytes, charset)
-        val stored = if (text.length > MAX_STORED) text.substring(0, MAX_STORED) + "\n…[TRUNCATED ${text.length - MAX_STORED} chars]" else text
+        val maxStored = if (storeFullBodies) FULL_MAX_STORED else MAX_STORED
+        val stored = if (text.length > maxStored) {
+            text.substring(0, maxStored) + "\n…[TRUNCATED ${text.length - maxStored} chars]"
+        } else {
+            text
+        }
 
         val wr = WebResourceResponse(mime ?: "text/plain", charset.name(), code, reason, passHeaders, ByteArrayInputStream(bytes))
         return Result(wr, baseLog(stored, bytes.size.toLong()))
@@ -161,5 +167,16 @@ class DeepCapture(private val packageName: String) {
             .build()
         private const val MAX_BUFFER = 6L * 1024 * 1024
         private const val MAX_STORED = 400_000
+
+        /**
+         * With full bodies on, a page's HTML/JSON is kept whole - reverse engineering a site needs
+         * the part that sits past the first 400 KB, and that is usually where the player config is.
+         * The ceiling is high rather than absent so one runaway response cannot exhaust memory.
+         */
+        private const val FULL_MAX_BUFFER = 64L * 1024 * 1024
+        private const val FULL_MAX_STORED = 32_000_000
+
+        @Volatile
+        var storeFullBodies: Boolean = true
     }
 }

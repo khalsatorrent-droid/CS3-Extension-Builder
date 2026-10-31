@@ -22,6 +22,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("desktop_mode", false)
         set(v) = sp.edit().putBoolean("desktop_mode", v).apply()
 
+    /** Keep whole response bodies instead of the old per-kind caps. */
+    var fullBodies: Boolean
+        get() = sp.getBoolean("full_bodies", true)
+        set(value) = sp.edit().putBoolean("full_bodies", value).apply()
+
     var hideNoise: Boolean
         get() = sp.getBoolean("hide_noise", true)
         set(v) = sp.edit().putBoolean("hide_noise", v).apply()

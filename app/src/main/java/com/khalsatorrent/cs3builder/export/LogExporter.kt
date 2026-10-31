@@ -25,6 +25,13 @@ object LogExporter {
     )
     private const val MAX_TOTAL = 1_800_000
 
+    /** Whole bodies instead of the old per-kind caps. Set from Prefs at startup. */
+    @Volatile
+    var fullBodies: Boolean = true
+
+    /** Generous ceiling so one huge export cannot run the device out of memory. */
+    private const val FULL_MAX_TOTAL = 60_000_000
+
     /**
      * A readable log meant to be pasted/uploaded to Claude (or any reviewer) to build an extension:
      * analysis first, then every important request in full, then a one-line index of the rest.
@@ -52,7 +59,8 @@ object LogExporter {
         var truncated = false
         important.forEachIndexed { i, l ->
             if (truncated) return@forEachIndexed
-            if (sb.length > MAX_TOTAL) { sb.appendLine("…[log truncated — export HAR for everything]"); truncated = true; return@forEachIndexed }
+            val totalCap = if (fullBodies) FULL_MAX_TOTAL else MAX_TOTAL
+            if (sb.length > totalCap) { sb.appendLine("…[log truncated — export HAR for everything]"); truncated = true; return@forEachIndexed }
             sb.appendLine("[${i + 1}] ${time.format(Date(l.timestamp))}  ${l.method} ${statusText(l)}  ${LogKind.label(l.kind)}  (${l.source})")
             sb.appendLine("URL: ${l.url}")
             if (!l.pageUrl.isNullOrBlank() && l.pageUrl != l.url) sb.appendLine("From page: ${l.pageUrl}")
@@ -73,10 +81,14 @@ object LogExporter {
             }
             val body = l.responseBody
             if (!body.isNullOrBlank()) {
-                val limit = when (l.kind) {
-                    LogKind.DOC, LogKind.DOM -> 20_000
-                    LogKind.STREAM -> 4_000
-                    else -> 8_000
+                val limit = if (fullBodies) {
+                    Int.MAX_VALUE
+                } else {
+                    when (l.kind) {
+                        LogKind.DOC, LogKind.DOM -> 20_000
+                        LogKind.STREAM -> 4_000
+                        else -> 8_000
+                    }
                 }
                 sb.appendLine("Response body (${body.length} chars${if (body.length > limit) ", first $limit" else ""}):")
                 sb.appendLine(prettyIfJson(body.take(limit)))

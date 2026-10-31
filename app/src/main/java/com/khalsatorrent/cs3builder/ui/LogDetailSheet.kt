@@ -57,6 +57,11 @@ object LogDetailSheet {
             }
         )
         val detail = buildDetail(log)
+        // Anything that looks like playable media gets a Play button - this is what makes a
+        // captured lulustream/luluvdo playlist actually watchable.
+        if (isPlayable(log)) {
+            action("▶ Play") { PlayerActivity.start(context, log.url, log.pageUrl, playerHeaders(log)) }
+        }
         action("URL") { ShareUtils.copyToClipboard(context, log.url, "URL") }
         action("cURL") { ShareUtils.copyToClipboard(context, LogExporter.curl(log), "cURL") }
         if (!log.responseBody.isNullOrBlank()) action("Response") { ShareUtils.copyToClipboard(context, log.responseBody, "Response") }
@@ -80,6 +85,28 @@ object LogDetailSheet {
         dialog.behavior.state = BottomSheetBehavior.STATE_EXPANDED
         dialog.behavior.skipCollapsed = true
         dialog.show()
+    }
+
+    /** A playlist or a direct media file, i.e. something the player can open. */
+    fun isPlayable(log: NetworkLog): Boolean {
+        if (log.kind == LogKind.STREAM || log.kind == LogKind.MEDIA) return true
+        val u = log.url.lowercase()
+        return u.contains(".m3u8") || u.contains(".mpd") || u.contains(".mp4") || u.contains(".mkv")
+    }
+
+    /** The headers the CDN expects, taken from the captured request. */
+    private fun playerHeaders(log: NetworkLog): Map<String, String> {
+        val wanted = listOf("Referer", "Origin", "User-Agent")
+        val out = LinkedHashMap<String, String>()
+        wanted.forEach { name ->
+            log.requestHeaders.entries
+                .firstOrNull { it.key.equals(name, true) && it.value.isNotBlank() }
+                ?.let { out[it.key] = it.value }
+        }
+        if (out.keys.none { it.equals("Referer", true) } && !log.pageUrl.isNullOrBlank()) {
+            out["Referer"] = log.pageUrl
+        }
+        return out
     }
 
     fun buildDetail(log: NetworkLog): String = buildString {
@@ -112,8 +139,9 @@ object LogDetailSheet {
         }
         if (!log.responseBody.isNullOrBlank()) {
             appendLine("── Response body (${log.responseBody.length} chars) ──")
-            appendLine(LogExporter.prettyBody(log.responseBody.take(60_000)))
-            if (log.responseBody.length > 60_000) appendLine("…[use Response to copy all]")
+            val shown = if (LogExporter.fullBodies) log.responseBody.length else 60_000
+            appendLine(LogExporter.prettyBody(log.responseBody.take(shown)))
+            if (log.responseBody.length > shown) appendLine("…[use Response to copy all]")
         } else if (log.responseCode == 0 && log.source == "webview") {
             appendLine("(Only the URL was visible for this request. Turn on Deep capture in the browser menu to record status, headers and body.)")
         }

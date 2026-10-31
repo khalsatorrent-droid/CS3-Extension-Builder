@@ -14,7 +14,9 @@ object CaptureScripts {
   window.__cs3Hooked = true;
   var B = window.CS3Bridge;
   if (!B) return;
-  var MAX = 60000;
+  // Whole bodies, not the first 60 KB: the part that matters when reverse engineering a site
+  // (the player config, the sources array) is usually far past the start of the response.
+  var MAX = 8000000;
 
   function send(o) {
     try { o.page = location.href; B.onRequestComplete(JSON.stringify(o)); } catch (e) {}
@@ -152,7 +154,7 @@ object CaptureScripts {
 
     /** Returns the rendered DOM of the current frame (capped). */
     const val DOM_SNAPSHOT =
-        "(function(){try{return document.documentElement.outerHTML.substring(0, 500000);}catch(e){return '';}})()"
+        "(function(){try{return document.documentElement.outerHTML.substring(0, 8000000);}catch(e){return '';}})()"
 
     /** Ad / popup suppression. Re-injected on every page while the blocker is on. */
     val AD_BLOCK = """
