@@ -64,6 +64,7 @@ object LogDetailSheet {
         }
         action("URL") { ShareUtils.copyToClipboard(context, log.url, "URL") }
         action("cURL") { ShareUtils.copyToClipboard(context, LogExporter.curl(log), "cURL") }
+        action("fetch()") { ShareUtils.copyToClipboard(context, LogExporter.fetchSnippet(log), "fetch()") }
         if (!log.responseBody.isNullOrBlank()) action("Response") { ShareUtils.copyToClipboard(context, log.responseBody, "Response") }
         action("All") { ShareUtils.copyToClipboard(context, detail, "Request") }
         action("Share") { ShareUtils.shareAsText(context, detail, "Request: ${log.url.take(60)}") }

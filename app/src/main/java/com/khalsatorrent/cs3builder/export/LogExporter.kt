@@ -67,17 +67,17 @@ object LogExporter {
             val reqH = l.requestHeaders.filterKeys { it.lowercase() !in NOISY_HEADERS }
             if (reqH.isNotEmpty()) {
                 sb.appendLine("Request headers:")
-                reqH.forEach { (k, v) -> sb.appendLine("  $k: ${v.take(if (k.equals("cookie", true)) 1200 else 400)}") }
+                reqH.forEach { (k, v) -> sb.appendLine("  $k: $v") }
             }
-            if (!l.requestBody.isNullOrBlank()) sb.appendLine("Request body: ${l.requestBody.take(3000)}")
+            if (!l.requestBody.isNullOrBlank()) sb.appendLine("Request body: ${l.requestBody}")
             val respH = l.responseHeaders.filterKeys { it.lowercase() in KEEP_RESPONSE_HEADERS }
             if (respH.isNotEmpty()) {
                 sb.appendLine("Response headers:")
-                respH.forEach { (k, v) -> sb.appendLine("  $k: ${v.take(400)}") }
+                respH.forEach { (k, v) -> sb.appendLine("  $k: $v") }
             }
             if (l.cookies.isNotEmpty() && l.kind != LogKind.DOM) {
                 sb.appendLine("Set-Cookie:")
-                l.cookies.take(10).forEach { sb.appendLine("  ${it.take(200)}") }
+                l.cookies.forEach { sb.appendLine("  $it") }
             }
             val body = l.responseBody
             if (!body.isNullOrBlank()) {
@@ -97,7 +97,7 @@ object LogExporter {
         }
         sb.appendLine()
         sb.appendLine("## OTHER REQUESTS (index)")
-        rest.forEach { l -> sb.appendLine("${time.format(Date(l.timestamp))} ${l.method.padEnd(4)} ${statusText(l).padEnd(4)} ${LogKind.label(l.kind).padEnd(5)} ${l.url.take(220)}") }
+        rest.forEach { l -> sb.appendLine("${time.format(Date(l.timestamp))} ${l.method.padEnd(4)} ${statusText(l).padEnd(4)} ${LogKind.label(l.kind).padEnd(5)} ${l.url}") }
         return sb.toString()
     }
 
@@ -184,6 +184,41 @@ object LogExporter {
     }
 
     /** curl command that replays the request. */
+    /**
+     * The same request as a fetch() call, ready to paste into a browser console on the site.
+     * curl replays from a shell; this replays from the page itself, which is what you want when
+     * the endpoint checks Origin, cookies or a token that only exists in that tab.
+     */
+    fun fetchSnippet(l: NetworkLog): String = buildString {
+        append("await fetch(").append(jsq(l.url)).append(", {\n")
+        append("  method: ").append(jsq(l.method.ifBlank { "GET" })).append(",\n")
+        append("  credentials: \"include\",\n")
+        if (l.requestHeaders.isNotEmpty()) {
+            append("  headers: {\n")
+            l.requestHeaders.entries
+                .filter { it.key.lowercase() !in NOISY_HEADERS && it.key.lowercase() != "cookie" }
+                .forEach { (k, v) -> append("    ").append(jsq(k)).append(": ").append(jsq(v)).append(",\n") }
+            append("  },\n")
+        }
+        if (!l.requestBody.isNullOrBlank()) {
+            append("  body: ").append(jsq(l.requestBody)).append(",\n")
+        }
+        if (!l.pageUrl.isNullOrBlank()) {
+            append("  referrer: ").append(jsq(l.pageUrl)).append(",\n")
+        }
+        append("}).then(r => r.text()).then(console.log);")
+    }
+
+    /** A JS string literal, escaped so urls and bodies survive the paste. */
+    private fun jsq(value: String): String {
+        val escaped = value
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n")
+            .replace("\r", "")
+        return "\"$escaped\""
+    }
+
     fun curl(l: NetworkLog): String = buildString {
         append("curl")
         if (l.method != "GET" && l.method != "DOM") append(" -X ${l.method}")
