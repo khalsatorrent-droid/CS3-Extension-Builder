@@ -242,7 +242,9 @@ class BrowserFragment : Fragment() {
             recents.forEachIndexed { i, site -> sub.add(2, M_RECENT_BASE + i, i, site) }
         }
         m.add(1, M_PLAY_MEDIA, 5, "▶ Play captured media")
-        m.add(1, M_SNAPSHOT, 6, "Snapshot this page now")
+        m.add(1, M_FIND, 6, "Find in page")
+        m.add(1, M_FORWARD, 7, "Forward")
+        m.add(1, M_SNAPSHOT, 8, "Snapshot this page now")
         m.add(1, M_COPY_URL, 7, "Copy page URL")
         m.add(1, M_COOKIES, 8, "Show cookies for this site")
         m.add(1, M_CLEAR_LOGS, 9, "Clear captured logs")
@@ -268,6 +270,8 @@ class BrowserFragment : Fragment() {
                     )
                 }
                 M_PLAY_MEDIA -> playCapturedMedia()
+                M_FIND -> findInPage()
+                M_FORWARD -> if (web.canGoForward()) web.goForward() else toast("Nothing to go forward to")
                 M_SNAPSHOT -> { val url = web.url
                     if (url != null) { loggingClient.snapshotDom(web, url); toast("Page HTML saved to Logs") } }
                 M_COPY_URL -> web.url?.let { ShareUtils.copyToClipboard(requireContext(), it, "URL") }
@@ -340,6 +344,34 @@ class BrowserFragment : Fragment() {
                     }.onFailure { toast("No app can open this link") }
                 }
             }
+            .show()
+    }
+
+    /** Find on page, the way any browser has it. */
+    private fun findInPage() {
+        val input = android.widget.EditText(requireContext()).apply {
+            hint = "Text to find"
+            setSingleLine()
+        }
+        AlertDialog.Builder(requireContext())
+            .setTitle("Find in page")
+            .setView(input)
+            .setPositiveButton("Find") { _, _ ->
+                val q = input.text.toString().trim()
+                if (q.isBlank()) return@setPositiveButton
+                web.findAllAsync(q)
+                web.setFindListener { total, index, _ ->
+                    activity?.runOnUiThread {
+                        if (total > 0) toast("${index + 1} of $total")
+                        else toast("Not found on this page")
+                    }
+                }
+            }
+            .setNeutralButton("Clear") { _, _ ->
+                web.clearMatches()
+                web.setFindListener(null)
+            }
+            .setNegativeButton("Close", null)
             .show()
     }
 
@@ -628,6 +660,8 @@ class BrowserFragment : Fragment() {
         private const val M_CLEAR_DATA = 11
         private const val M_FULL_BODIES = 12
         private const val M_PLAY_MEDIA = 13
+        private const val M_FIND = 14
+        private const val M_FORWARD = 15
         private const val M_RECENT_BASE = 100
         private const val MAX_TABS = 6
 
