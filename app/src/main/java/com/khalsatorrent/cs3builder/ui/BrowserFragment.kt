@@ -293,10 +293,11 @@ class BrowserFragment : Fragment() {
      * Long-pressing a link offers what a normal browser does. The WebView's own long-press only
      * selects text, so without this the link url is never reachable.
      */
-    @SuppressLint("ClickableViewAccessibility")
     private fun attachLinkMenu(webView: WebView) {
-        webView.setOnLongClickListener { msg ->
-            val result = msg.data as? WebView.HitTestResult ?: return@setOnLongClickListener false
+        webView.setOnLongClickListener {
+            // The hit-test result is read from the WebView itself: a long-click listener gets the
+            // View, not the Message that WebView's internal handler uses.
+            val result = webView.hitTestResult ?: return@setOnLongClickListener false
             val href = result.extra ?: return@setOnLongClickListener false
             if (!href.startsWith("http")) return@setOnLongClickListener false
             if (result.type == WebView.HitTestResult.SRC_ANCHOR_TYPE ||
