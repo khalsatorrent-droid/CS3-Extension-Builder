@@ -43,6 +43,7 @@ class MainActivity : AppCompatActivity() {
         // Apply the body-size setting before anything is captured or exported.
         val prefs = Prefs(this)
         DeepCapture.storeFullBodies = prefs.fullBodies
+        DeepCapture.captureScripts = prefs.captureScripts
         LogExporter.fullBodies = prefs.fullBodies
 
         ViewCompat.setOnApplyWindowInsetsListener(binding.appBarLayout) { v, insets ->

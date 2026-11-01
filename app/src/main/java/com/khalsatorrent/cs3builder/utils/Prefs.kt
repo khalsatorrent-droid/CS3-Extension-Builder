@@ -22,6 +22,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("desktop_mode", false)
         set(v) = sp.edit().putBoolean("desktop_mode", v).apply()
 
+    /** Capture javascript bodies - needed to read an api key out of a site's bundle. */
+    var captureScripts: Boolean
+        get() = sp.getBoolean("capture_scripts", false)
+        set(value) = sp.edit().putBoolean("capture_scripts", value).apply()
+
     /** Keep whole response bodies instead of the old per-kind caps. */
     var fullBodies: Boolean
         get() = sp.getBoolean("full_bodies", true)

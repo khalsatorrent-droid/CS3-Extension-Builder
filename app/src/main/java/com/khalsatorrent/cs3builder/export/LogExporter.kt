@@ -104,7 +104,9 @@ object LogExporter {
     private fun statusText(l: NetworkLog) = if (l.responseCode > 0) l.responseCode.toString() else "—"
 
     fun isImportant(l: NetworkLog): Boolean = when (l.kind) {
-        LogKind.IMAGE, LogKind.FONT, LogKind.STYLE, LogKind.SCRIPT -> false
+        LogKind.IMAGE, LogKind.FONT, LogKind.STYLE -> false
+        // a script is only interesting when its body was deliberately captured
+        LogKind.SCRIPT -> l.responseBody != null
         LogKind.MEDIA -> !l.url.substringBefore('?').let { it.endsWith(".ts") || it.endsWith(".m4s") || it.endsWith(".aac") }
         LogKind.DOC -> l.isMainFrame || l.responseBody != null || l.method != "GET"
         LogKind.OTHER -> l.responseBody != null || l.method == "POST"

@@ -34,7 +34,11 @@ class DeepCapture(private val packageName: String) {
         if (headers.keys.any { it.equals("Range", true) }) return false
         val accept = headers.entries.firstOrNull { it.key.equals("Accept", true) }?.value
         return when (LogKind.classify(request.url.toString(), null, accept)) {
-            LogKind.IMAGE, LogKind.FONT, LogKind.STYLE, LogKind.SCRIPT, LogKind.MEDIA -> false
+            // Scripts are normally skipped: a bundle is megabytes of minified code that no
+            // extension needs. But when a site encrypts its own api, the key is in there and
+            // there is no other way to read it, so this is switchable.
+            LogKind.IMAGE, LogKind.FONT, LogKind.STYLE, LogKind.MEDIA -> false
+            LogKind.SCRIPT -> captureScripts
             else -> !(accept?.startsWith("image/") == true || accept?.startsWith("video/") == true)
         }
     }
@@ -178,5 +182,9 @@ class DeepCapture(private val packageName: String) {
 
         @Volatile
         var storeFullBodies: Boolean = true
+
+        /** Store javascript bodies too. Off by default; needed for sites that encrypt their api. */
+        @Volatile
+        var captureScripts: Boolean = false
     }
 }

@@ -242,6 +242,8 @@ class BrowserFragment : Fragment() {
             recents.forEachIndexed { i, site -> sub.add(2, M_RECENT_BASE + i, i, site) }
         }
         m.add(1, M_PLAY_MEDIA, 5, "▶ Play captured media")
+        m.add(0, M_SCRIPTS, 6, "Capture JavaScript bodies (encrypted APIs)")
+            .setCheckable(true).isChecked = prefs.captureScripts
         m.add(1, M_FIND, 6, "Find in page")
         m.add(1, M_FORWARD, 7, "Forward")
         m.add(1, M_SNAPSHOT, 8, "Snapshot this page now")
@@ -270,6 +272,14 @@ class BrowserFragment : Fragment() {
                     )
                 }
                 M_PLAY_MEDIA -> playCapturedMedia()
+                M_SCRIPTS -> {
+                    prefs.captureScripts = !prefs.captureScripts
+                    applyBodyLimits()
+                    toast(
+                        if (prefs.captureScripts) "Capturing JS bodies - reload the page, then export"
+                        else "JS bodies off"
+                    )
+                }
                 M_FIND -> findInPage()
                 M_FORWARD -> if (web.canGoForward()) web.goForward() else toast("Nothing to go forward to")
                 M_SNAPSHOT -> { val url = web.url
@@ -290,6 +300,7 @@ class BrowserFragment : Fragment() {
     /** Keeps DeepCapture and the exporter in step with the setting. */
     private fun applyBodyLimits() {
         DeepCapture.storeFullBodies = prefs.fullBodies
+        DeepCapture.captureScripts = prefs.captureScripts
         LogExporter.fullBodies = prefs.fullBodies
     }
 
@@ -662,6 +673,7 @@ class BrowserFragment : Fragment() {
         private const val M_PLAY_MEDIA = 13
         private const val M_FIND = 14
         private const val M_FORWARD = 15
+        private const val M_SCRIPTS = 16
         private const val M_RECENT_BASE = 100
         private const val MAX_TABS = 6
 
