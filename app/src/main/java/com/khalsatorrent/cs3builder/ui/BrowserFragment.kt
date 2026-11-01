@@ -20,6 +20,7 @@ import android.widget.FrameLayout
 import android.widget.PopupMenu
 import android.widget.Toast
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.fragment.app.Fragment
@@ -39,6 +40,13 @@ import com.khalsatorrent.cs3builder.network.LoggingWebViewClient
 import com.khalsatorrent.cs3builder.utils.Prefs
 import com.khalsatorrent.cs3builder.utils.ShareUtils
 import java.util.UUID
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.jsoup.Jsoup
 
 class BrowserFragment : Fragment() {
 
@@ -244,7 +252,8 @@ class BrowserFragment : Fragment() {
         m.add(1, M_PLAY_MEDIA, 5, "▶ Play captured media")
         m.add(0, M_SCRIPTS, 6, "Capture JavaScript bodies (encrypted APIs)")
             .setCheckable(true).isChecked = prefs.captureScripts
-        m.add(1, M_FIND, 6, "Find in page")
+        m.add(1, M_GRAB_SCRIPTS, 6, "Grab this page's scripts now")
+        m.add(1, M_FIND, 7, "Find in page")
         m.add(1, M_FORWARD, 7, "Forward")
         m.add(1, M_SNAPSHOT, 8, "Snapshot this page now")
         m.add(1, M_COPY_URL, 7, "Copy page URL")
@@ -280,6 +289,7 @@ class BrowserFragment : Fragment() {
                         else "JS bodies off"
                     )
                 }
+                M_GRAB_SCRIPTS -> capturePageScripts()
                 M_FIND -> findInPage()
                 M_FORWARD -> if (web.canGoForward()) web.goForward() else toast("Nothing to go forward to")
                 M_SNAPSHOT -> { val url = web.url
@@ -384,6 +394,89 @@ class BrowserFragment : Fragment() {
             }
             .setNegativeButton("Close", null)
             .show()
+    }
+
+    private val scriptClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(40, TimeUnit.SECONDS)
+            .build()
+    }
+
+    /**
+     * Fetches the current page's own scripts through OkHttp and stores them as logs.
+     *
+     * The scripts toggle only records a bundle the WebView actually downloads, and a SPA that has
+     * already been visited serves its bundle from cache, so the file that matters never crosses
+     * the network again. This asks the page which scripts it uses and fetches each one directly,
+     * which is what you want on a site that encrypts its api: the key is in there.
+     */
+    private fun capturePageScripts() {
+        val pageUrl = web.url
+        if (pageUrl == null) { toast("Open a page first"); return }
+        toast("Fetching this page's scripts…")
+
+        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+            val ua = currentUserAgent()
+            val html = runCatching {
+                scriptClient.newCall(
+                    Request.Builder().url(pageUrl).header("User-Agent", ua).build()
+                ).execute().use { r -> if (r.isSuccessful) r.body?.string() else null }
+            }.getOrNull()
+
+            if (html == null) {
+                withContext(Dispatchers.Main) { toast("Could not read the page") }
+                return@launch
+            }
+
+            val srcs = Jsoup.parse(html, pageUrl).select("script[src]")
+                .mapNotNull { it.absUrl("src").ifBlank { null } }
+                .filter { it.startsWith("http") }
+                .distinct()
+
+            var saved = 0
+            for (src in srcs) {
+                val body = runCatching {
+                    scriptClient.newCall(
+                        Request.Builder().url(src)
+                            .header("User-Agent", ua)
+                            .header("Referer", pageUrl)
+                            .build()
+                    ).execute().use { r -> if (r.isSuccessful) r.body?.string() else null }
+                }.getOrNull() ?: continue
+
+                LogRepository.addLog(
+                    NetworkLog(
+                        id = UUID.randomUUID().toString(),
+                        timestamp = System.currentTimeMillis(),
+                        method = "GET",
+                        url = src,
+                        requestHeaders = mapOf("User-Agent" to ua, "Referer" to pageUrl),
+                        requestBody = null,
+                        responseCode = 200,
+                        responseHeaders = emptyMap(),
+                        responseBody = body,
+                        cookies = emptyList(),
+                        mimeType = "application/javascript",
+                        isXHR = false,
+                        duration = 0L,
+                        source = "scripts",
+                        kind = LogKind.SCRIPT,
+                        isMainFrame = false,
+                        pageUrl = pageUrl,
+                        responseSize = body.length.toLong()
+                    )
+                )
+                saved++
+            }
+
+            withContext(Dispatchers.Main) {
+                toast(
+                    if (saved > 0) "Captured $saved script(s) — export the log now"
+                    else "No scripts found on this page"
+                )
+            }
+        }
     }
 
     private fun openUrlInNewTab(url: String, switch: Boolean) {
@@ -674,6 +767,7 @@ class BrowserFragment : Fragment() {
         private const val M_FIND = 14
         private const val M_FORWARD = 15
         private const val M_SCRIPTS = 16
+        private const val M_GRAB_SCRIPTS = 17
         private const val M_RECENT_BASE = 100
         private const val MAX_TABS = 6
 
