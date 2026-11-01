@@ -4,6 +4,11 @@ All notable changes to CS3 Extension Builder will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.11] - 2026-11-01
+
+### Changed
+- See commit log for details
+
 ## [2.0.10] - 2026-11-01
 
 ### Changed
