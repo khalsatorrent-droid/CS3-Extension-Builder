@@ -151,6 +151,19 @@ object SiteAnalyzer {
             }
         if (streams.isEmpty()) notes += "No video stream (.m3u8/.mp4) was captured — press play on an episode/movie and let it start, then regenerate."
 
+        // A site that encrypts its own api hides everything - the list, the detail and the stream
+        // url - behind a key that lives in its javascript. Saying so here saves a wasted capture:
+        // the fix is the scripts toggle, not another press of play.
+        val encryptedApi = logs.any { l ->
+            val b = l.responseBody ?: return@any false
+            b.contains("\"payload\"") && b.contains("U2FsdGVkX1")
+        }
+        if (encryptedApi) {
+            notes += "This site's API is encrypted (CryptoJS payloads). The key is in its javascript bundle, so turn on " +
+                "\"Capture JavaScript bodies (encrypted APIs)\" in the browser menu, clear site data, reload and capture again — " +
+                "without the bundle the api cannot be read."
+        }
+
         val embedUrls = LinkedHashSet<String>()
         logs.filter { it.kind == LogKind.DOC && !it.isMainFrame && it.host.isNotBlank() && !HtmlAnalyzer.sameSite(it.url, host) }
             .forEach { embedUrls += it.url }
