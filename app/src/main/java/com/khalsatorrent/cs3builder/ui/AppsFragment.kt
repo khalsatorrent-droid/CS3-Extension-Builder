@@ -23,14 +23,23 @@ import androidx.recyclerview.widget.RecyclerView
 import com.khalsatorrent.cs3builder.MainActivity
 import com.khalsatorrent.cs3builder.R
 import com.khalsatorrent.cs3builder.databinding.FragmentAppsBinding
+import com.khalsatorrent.cs3builder.monitor.AppMonitorService
+import com.khalsatorrent.cs3builder.monitor.HostClassifier
+import com.khalsatorrent.cs3builder.utils.ShareUtils
+import android.app.Activity
+import android.net.VpnService
+import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Capturing another app's traffic. Android does not allow one app to run another APK inside
- * itself reliably, so this drives a dedicated capture tool (Reqable / HttpCanary / PCAPdroid)
- * for the chosen app and imports the resulting HAR into the Logs tab.
+ * Watching another app's network activity.
+ *
+ * The built-in App Monitor ([AppMonitorService]) places only the chosen app in a local VPN that
+ * routes nothing but its DNS, so it lists every server the app talks to with no certificate and
+ * without touching any other app. External tools (PCAPdroid, Reqable…) remain available for
+ * full captures, imported into Logs.
  */
 class AppsFragment : Fragment() {
 
@@ -50,6 +59,15 @@ class AppsFragment : Fragment() {
 
     private var apps: List<AppEntry> = emptyList()
     private val adapter = AppAdapter { showAppActions(it) }
+    private var pendingMonitor: AppEntry? = null
+
+    /** Android asks once for permission to create the local VPN. */
+    private val vpnConsent = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val app = pendingMonitor
+        pendingMonitor = null
+        if (result.resultCode == Activity.RESULT_OK && app != null) beginMonitor(app)
+        else if (app != null) toast("The monitor needs that permission to see ${app.label}'s lookups")
+    }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = FragmentAppsBinding.inflate(inflater, container, false)
@@ -67,7 +85,81 @@ class AppsFragment : Fragment() {
             override fun afterTextChanged(s: Editable?) = filter(s?.toString().orEmpty())
         })
         renderTools()
+        binding.btnMonitorStop.setOnClickListener { AppMonitorService.stop(requireContext()) }
+        binding.btnMonitorHosts.setOnClickListener { showHosts() }
+        binding.btnMonitorOpen.setOnClickListener { AppMonitorService.session.value?.let { launch(it.pkg) } }
+        AppMonitorService.session.observe(viewLifecycleOwner) { renderMonitor() }
+        AppMonitorService.hosts.observe(viewLifecycleOwner) { renderMonitor() }
+        AppMonitorService.error.observe(viewLifecycleOwner) { msg -> if (msg != null) { toast(msg); AppMonitorService.error.value = null } }
     }
+
+    // ---- built-in App Monitor ----
+
+    private fun startMonitor(app: AppEntry) {
+        val consent = VpnService.prepare(requireContext())
+        if (consent != null) {
+            pendingMonitor = app
+            vpnConsent.launch(consent)
+        } else beginMonitor(app)
+    }
+
+    private fun beginMonitor(app: AppEntry) {
+        AppMonitorService.start(requireContext(), app.pkg, app.label)
+        toast("Monitoring ${app.label} — use it now, then come back to see its servers")
+        // Give the tunnel a moment so the app's first lookups are caught
+        view?.postDelayed({ launch(app.pkg) }, 700)
+    }
+
+    private fun renderMonitor() {
+        val b = _binding ?: return
+        val s = AppMonitorService.session.value
+        b.cardMonitor.visibility = if (s == null) View.GONE else View.VISIBLE
+        if (s == null) return
+        val hosts = AppMonitorService.hosts.value.orEmpty()
+        val api = hosts.count { it.kind == HostClassifier.Kind.API || it.kind == HostClassifier.Kind.APP }
+        val media = hosts.count { it.kind == HostClassifier.Kind.MEDIA }
+        val mins = ((System.currentTimeMillis() - s.started) / 60000).toInt()
+        b.tvMonitorTitle.text = "● Monitoring ${s.label}"
+        b.tvMonitorStats.text = if (hosts.isEmpty())
+            "No lookups yet — open ${s.label} and browse, search, play something. (${mins}m)"
+        else "${hosts.size} servers · $api app/API · $media video/CDN · ${mins}m. Every server is also in Logs."
+    }
+
+    private fun showHosts() {
+        val s = AppMonitorService.session.value
+        val hosts = AppMonitorService.hosts.value.orEmpty()
+        if (hosts.isEmpty()) { toast("Nothing yet — use the app first"); return }
+        val labels = hosts.map { h -> "[${h.kind.label}] ${h.host}  ×${h.count}" }.toTypedArray()
+        AlertDialog.Builder(requireContext())
+            .setTitle("${s?.label ?: "App"} talks to")
+            .setItems(labels) { _, i -> showHostActions(hosts[i]) }
+            .setPositiveButton("Share list") { _, _ ->
+                val text = buildString {
+                    appendLine("Servers used by ${s?.label} (${s?.pkg}) — captured by CS3 Extension Builder App Monitor")
+                    hosts.groupBy { it.kind }.toSortedMap(compareBy { it.rank }).forEach { (k, list) ->
+                        appendLine(); appendLine("## ${k.label}")
+                        list.forEach { appendLine("${it.host}  (×${it.count})  ${it.addresses.take(3).joinToString(", ")}") }
+                    }
+                }
+                ShareUtils.shareAsText(requireContext(), text, "Servers used by ${s?.label}")
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun showHostActions(h: AppMonitorService.Host) {
+        val info = "Category: ${h.kind.label}\nLooked up ${h.count}×\n" +
+            (if (h.addresses.isEmpty()) "No answer" else "Resolves to:\n" + h.addresses.joinToString("\n"))
+        AlertDialog.Builder(requireContext())
+            .setTitle(h.host)
+            .setMessage(info)
+            .setPositiveButton("Open in Browser") { _, _ -> (activity as? MainActivity)?.navigateToBrowser("https://${h.host}/") }
+            .setNeutralButton("Copy") { _, _ -> ShareUtils.copyToClipboard(requireContext(), h.host, "Host") }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun toast(msg: String) = Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
 
     override fun onHiddenChanged(hidden: Boolean) {
         super.onHiddenChanged(hidden)
@@ -145,23 +237,25 @@ class AppsFragment : Fragment() {
         val tool = installedTool()
         val hasPcapdroid = tool?.first?.name == "PCAPdroid"
         val steps = buildString {
-            appendLine("No-certificate route (safe for banking apps — PCAPdroid only touches ${app.label}):")
-            appendLine("1. Capture only ${app.label} in PCAPdroid with decryption OFF. No certificate is installed, so nothing else on your phone is affected.")
-            appendLine("2. Use ${app.label}: open the home screen, search, open a title, press play.")
-            appendLine("3. Stop, then Export as PCAP/PCAPNG and tap Import here.")
-            appendLine("   → You get every hostname/endpoint the app uses (HTTPS bodies stay encrypted without a cert).")
-            appendLine("4. Open those hosts in the Browser tab to capture the actual API responses — most streaming apps use the same API as their website, and the browser needs no certificate.")
+            appendLine("Monitor in this app — built in, no certificate:")
+            appendLine("Only ${app.label} is placed in a local VPN, and only its DNS goes through it. Your other apps (banking included) are never touched.")
             appendLine()
-            append("Full bodies from the app itself need TLS decryption, which needs a certificate. PCAPdroid installs its cert per-app (not system-wide), so even then your banking apps are untouched — but many apps ignore user certs, which is why the Browser route above is usually the real answer.")
+            appendLine("1. Tap Monitor — ${app.label} opens.")
+            appendLine("2. Use it: home, search, open a title, press play.")
+            appendLine("3. Come back: you get every server it talks to, sorted API → video CDN → ads.")
+            appendLine("4. Open the API / app host in the Browser tab — if the service has a website or web player, that captures the real requests.")
+            appendLine()
+            append("Tip: set Private DNS to Off or Automatic while monitoring, or lookups can bypass the monitor. Request contents stay encrypted — seeing those needs a certificate (PCAPdroid with decryption, under More).")
         }
         val options = mutableListOf<Pair<String, () -> Unit>>()
         fun opt(label: String, action: () -> Unit) = label to action
+        options += opt("Monitor ${app.label} (built in)") { startMonitor(app) }
         if (hasPcapdroid && tool != null) {
             val pcapPkg = tool.second
-            options += opt("Capture ${app.label} — no cert (hostnames)") { startPcapdroid(pcapPkg, app.pkg, decrypt = false) }
-            options += opt("Capture ${app.label} — decrypt (needs cert)") { startPcapdroid(pcapPkg, app.pkg, decrypt = true) }
+            options += opt("PCAPdroid capture — no cert") { startPcapdroid(pcapPkg, app.pkg, decrypt = false) }
+            options += opt("PCAPdroid capture — decrypt (needs cert)") { startPcapdroid(pcapPkg, app.pkg, decrypt = true) }
         } else {
-            options += opt("Get PCAPdroid (no system cert needed)") { openUrl(tools.first { it.name == "PCAPdroid" }.download) }
+            options += opt("Get PCAPdroid (full packet captures)") { openUrl(tools.first { it.name == "PCAPdroid" }.download) }
         }
         if (tool != null) options += opt("Open ${tool.first.name}") { launch(tool.second) }
         options += opt("Launch ${app.label}") { launch(app.pkg) }
@@ -172,14 +266,14 @@ class AppsFragment : Fragment() {
         AlertDialog.Builder(ctx)
             .setTitle(app.label)
             .setMessage(steps)
-            .setPositiveButton(options[0].first) { _, _ -> options[0].second() }
+            .setPositiveButton("Monitor") { _, _ -> startMonitor(app) }
             .setNeutralButton("More…") { _, _ ->
                 AlertDialog.Builder(ctx)
                     .setTitle(app.label)
                     .setItems(options.map { it.first }.toTypedArray()) { _, i -> options[i].second() }
                     .show()
             }
-            .setNegativeButton("Launch app") { _, _ -> launch(app.pkg) }
+            .setNegativeButton("Cancel", null)
             .show()
     }
 

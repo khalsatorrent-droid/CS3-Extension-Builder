@@ -35,6 +35,11 @@ import com.khalsatorrent.cs3builder.export.LogExporter
 import com.khalsatorrent.cs3builder.model.NetworkLog
 import com.khalsatorrent.cs3builder.network.DeepCapture
 import com.khalsatorrent.cs3builder.network.CaptureScripts
+import com.khalsatorrent.cs3builder.network.InspectorScripts
+import com.khalsatorrent.cs3builder.codegen.CaptureProgress
+import com.khalsatorrent.cs3builder.codegen.SelectorHints
+import android.webkit.JavascriptInterface
+import com.google.gson.Gson
 import com.khalsatorrent.cs3builder.network.LogRepository
 import com.khalsatorrent.cs3builder.network.LoggingWebViewClient
 import com.khalsatorrent.cs3builder.utils.Prefs
@@ -64,6 +69,10 @@ class BrowserFragment : Fragment() {
     private var documentStartHook = false
     private var mobileUserAgent = ""
 
+    private var picking = false
+    private var pickSheet: PickSheet? = null
+    private val gson = Gson()
+
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private var originalOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
@@ -76,6 +85,7 @@ class BrowserFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         prefs = Prefs(requireContext())
+        prefs.loadSelectorHints()
         applyBodyLimits()
         setupWebView()
         setupControls()
@@ -131,6 +141,7 @@ class BrowserFragment : Fragment() {
                     activity?.runOnUiThread {
                         val b = _binding ?: return@runOnUiThread
                         if (webView !== web) return@runOnUiThread
+                        if (picking) setPicking(false, runJs = false)
                         if (!b.etUrl.hasFocus()) b.etUrl.setText(url)
                         b.startPanel.visibility = View.GONE
                         b.btnBack.isEnabled = canGoBackAnywhere()
@@ -193,6 +204,7 @@ class BrowserFragment : Fragment() {
             userAgentString = currentUserAgent()
         }
         webView.addJavascriptInterface(client.JSBridge(), "CS3Bridge")
+        webView.addJavascriptInterface(InspectorBridge(), "CS3Inspector")
 
         // Inject the capture hook before any page script runs, in every frame (iframes too)
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
@@ -218,8 +230,13 @@ class BrowserFragment : Fragment() {
         }
     }
 
-    private fun currentUserAgent(): String =
-        if (prefs.desktopMode) DESKTOP_UA else mobileUserAgent.ifBlank { MOBILE_UA }
+    private fun currentUserAgent(): String = when (prefs.uaPreset) {
+        "desktop" -> DESKTOP_UA
+        "iphone" -> IPHONE_UA
+        "tv" -> TV_UA
+        "custom" -> prefs.customUa.ifBlank { mobileUserAgent.ifBlank { MOBILE_UA } }
+        else -> mobileUserAgent.ifBlank { MOBILE_UA }
+    }
 
     private fun setupControls() {
         binding.btnBack.setOnClickListener { handleBack() }
@@ -232,6 +249,9 @@ class BrowserFragment : Fragment() {
         }
         binding.btnViewLogs.setOnClickListener { (activity as? MainActivity)?.navigateToLogs() }
         binding.btnMenu.setOnClickListener { showMenu(it) }
+        binding.btnPickDone.setOnClickListener { setPicking(false) }
+        binding.btnStreams.setOnClickListener { playCapturedMedia() }
+        binding.captureBar.setOnClickListener { showChecklist() }
     }
 
     private fun showMenu(anchor: View) {
@@ -240,7 +260,10 @@ class BrowserFragment : Fragment() {
         m.add(0, M_DEEP, 0, "Deep capture (status, headers, bodies)").setCheckable(true).isChecked = prefs.deepCapture
         m.add(0, M_DOM, 1, "Save rendered page HTML").setCheckable(true).isChecked = prefs.domSnapshots
         m.add(0, M_ADS, 2, "Block ads & popups").setCheckable(true).isChecked = prefs.adBlock
-        m.add(0, M_DESKTOP, 3, "Desktop site").setCheckable(true).isChecked = prefs.desktopMode
+        m.add(1, M_PICK, 0, "🎯 Pick element → CSS selector")
+        m.add(1, M_CONSOLE, 0, "⌨ JS console")
+        m.add(1, M_CHECKLIST, 0, "✓ Capture checklist")
+        m.add(0, M_UA, 3, "User agent: ${uaLabel()}…")
         m.add(0, M_PAUSE, 4, "Pause capture").setCheckable(true).isChecked = LogRepository.isPaused
         m.add(0, M_FULL_BODIES, 5, "Full response bodies (no truncation)")
             .setCheckable(true).isChecked = prefs.fullBodies
@@ -258,6 +281,7 @@ class BrowserFragment : Fragment() {
         m.add(1, M_SNAPSHOT, 8, "Snapshot this page now")
         m.add(1, M_COPY_URL, 7, "Copy page URL")
         m.add(1, M_COOKIES, 8, "Show cookies for this site")
+        m.add(1, M_PICKS, 9, "Saved selector picks")
         m.add(1, M_CLEAR_LOGS, 9, "Clear captured logs")
         m.add(1, M_CLEAR_DATA, 10, "Clear cookies & site data")
         popup.setOnMenuItemClickListener { item ->
@@ -268,9 +292,11 @@ class BrowserFragment : Fragment() {
                 M_ADS -> { prefs.adBlock = !prefs.adBlock; updateModes()
                     if (prefs.adBlock) web.evaluateJavascript(CaptureScripts.AD_BLOCK, null)
                     toast(if (prefs.adBlock) "Ad & popup blocking on" else "Ad blocking off") }
-                M_DESKTOP -> { prefs.desktopMode = !prefs.desktopMode
-                    tabs.forEach { it.settings.userAgentString = currentUserAgent() }
-                    updateModes(); web.reload() }
+                M_UA -> chooseUserAgent()
+                M_PICK -> setPicking(!picking)
+                M_CONSOLE -> showConsole()
+                M_CHECKLIST -> showChecklist()
+                M_PICKS -> showSavedPicks()
                 M_PAUSE -> LogRepository.setPaused(!LogRepository.isPaused)
                 M_FULL_BODIES -> {
                     prefs.fullBodies = !prefs.fullBodies
@@ -568,7 +594,7 @@ class BrowserFragment : Fragment() {
         val parts = mutableListOf<String>()
         if (prefs.deepCapture) parts += "DEEP"
         if (prefs.adBlock) parts += "ADBLOCK"
-        if (prefs.desktopMode) parts += "DESKTOP"
+        if (prefs.uaPreset != "mobile") parts += uaLabel().uppercase()
         b.tvModes.text = parts.joinToString(" · ")
     }
 
@@ -580,14 +606,181 @@ class BrowserFragment : Fragment() {
     private fun renderStatus(logs: List<NetworkLog>) {
         val b = _binding ?: return
         val paused = LogRepository.isPaused
-        val streams = logs.count { it.kind == LogKind.STREAM || it.kind == LogKind.MEDIA }
         val apis = logs.count { it.kind == LogKind.XHR }
         b.captureIndicator.setBackgroundResource(if (paused) R.drawable.bg_indicator_dot_paused else R.drawable.bg_indicator_dot)
+        val progress = CaptureProgress.compute(logs)
         b.tvCaptureStatus.text = when {
             paused -> "Paused — ${logs.size} logged"
             logs.isEmpty() -> "Ready — browse to start capturing"
-            else -> "${logs.size} req · $apis API · $streams media"
+            progress.complete -> "✓ Ready to generate · ${logs.size} req · $apis API"
+            else -> "${progress.compact()} · ${logs.size}"
         }
+        // Stream badge: playable media found so far
+        val streams = logs.filter { l ->
+            LogDetailSheet.isPlayable(l) && l.responseCode != 403 &&
+                l.url.substringBefore('?').lowercase().let { p -> SEGMENT_EXT.none { p.endsWith(it) } }
+        }.distinctBy { it.url.substringBefore('?') }.size
+        b.btnStreams.visibility = if (streams > 0) View.VISIBLE else View.GONE
+        b.btnStreams.text = "▶ $streams"
+    }
+
+    /** What a good capture still needs, tappable from the capture bar. */
+    private fun showChecklist() {
+        val state = CaptureProgress.compute(LogRepository.getSnapshot())
+        val msg = buildString {
+            appendLine(state.host?.let { "Site: $it" } ?: "No site captured yet.")
+            appendLine()
+            state.steps.forEach { st ->
+                appendLine((if (st.done) "✓ " else "○ ") + st.name)
+                if (st.done) st.evidence?.let { appendLine("   ${it.take(90)}") } else appendLine("   → ${st.hint}")
+            }
+            appendLine()
+            append(if (state.complete) "Everything is captured — go to Logs and tap Generate." else "Do the ○ steps, then Generate. The generator only knows what you showed it.")
+        }
+        AlertDialog.Builder(requireContext())
+            .setTitle("Capture checklist  ${state.doneCount}/4")
+            .setMessage(msg)
+            .setPositiveButton(if (state.complete) "Generate" else "OK") { _, _ ->
+                if (state.complete) (activity as? MainActivity)?.generateAndShowCode()
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    // ---- element picker ----
+
+    inner class InspectorBridge {
+        @JavascriptInterface
+        fun onPick(json: String) {
+            activity?.runOnUiThread { if (_binding != null) showPick(json) }
+        }
+    }
+
+    private fun setPicking(on: Boolean, runJs: Boolean = true) {
+        val b = _binding ?: return
+        if (on == picking) return
+        picking = on
+        b.pickBar.visibility = if (on) View.VISIBLE else View.GONE
+        if (runJs) web.evaluateJavascript(if (on) InspectorScripts.PICKER else InspectorScripts.PICK_STOP, null)
+        if (!on) { pickSheet?.dismiss(); pickSheet = null }
+        else toast("Tap a movie card, title, poster or episode link")
+    }
+
+    private fun showPick(json: String) {
+        val host = web.url?.let { Uri.parse(it).host } ?: return
+        val sheet = pickSheet ?: PickSheet(
+            requireContext(), host,
+            test = { sel, done ->
+                web.evaluateJavascript(InspectorScripts.testSelector(gson.toJson(sel))) { raw ->
+                    try {
+                        val str = gson.fromJson(raw, String::class.java)
+                        val o = com.google.gson.JsonParser.parseString(str).asJsonObject
+                        if (o.has("error")) done(0, emptyList(), o.get("error").asString)
+                        else done(o.get("count").asInt, o.getAsJsonArray("samples").map { it.asString }, null)
+                    } catch (e: Exception) { done(0, emptyList(), e.message) }
+                }
+            },
+            parent = { web.evaluateJavascript(InspectorScripts.PICK_PARENT, null) },
+            child = { web.evaluateJavascript(InspectorScripts.PICK_CHILD, null) },
+            onSaved = { prefs.saveSelectorHints() }
+        ).also { pickSheet = it }
+        sheet.show(json)
+    }
+
+    private fun showSavedPicks() {
+        val host = web.url?.let { Uri.parse(it).host }
+        val all = SelectorHints.all()
+        if (all.isEmpty()) { toast("No picks yet — use 🎯 Pick element on a site"); return }
+        val text = all.entries.joinToString("\n\n") { (h, m) ->
+            h + "\n" + m.entries.joinToString("\n") { (r, v) -> "  ${r.label}: ${v.selector}${v.attr?.let { a -> " [$a]" } ?: ""}" }
+        }
+        AlertDialog.Builder(requireContext())
+            .setTitle("Selectors you picked")
+            .setMessage(text)
+            .setPositiveButton("Close", null)
+            .apply {
+                if (host != null && SelectorHints.get(host).isNotEmpty()) setNeutralButton("Clear this site") { _, _ ->
+                    SelectorHints.clear(host); prefs.saveSelectorHints(); toast("Cleared picks for $host")
+                }
+            }
+            .show()
+    }
+
+    // ---- JS console ----
+
+    private fun showConsole() {
+        val ctx = requireContext()
+        val dp = resources.displayMetrics.density
+        val input = android.widget.EditText(ctx).apply {
+            setText(prefs.lastConsoleCode)
+            typeface = android.graphics.Typeface.MONOSPACE
+            textSize = 13f
+            minLines = 3
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        }
+        val wrap = android.widget.FrameLayout(ctx).apply {
+            setPadding((20 * dp).toInt(), (8 * dp).toInt(), (20 * dp).toInt(), 0)
+            addView(input)
+        }
+        AlertDialog.Builder(ctx)
+            .setTitle("JS console — runs in this page")
+            .setView(wrap)
+            .setPositiveButton("Run") { _, _ -> runConsole(input.text.toString()) }
+            .setNeutralButton("Snippets") { _, _ ->
+                val keys = InspectorScripts.SNIPPETS.keys.toTypedArray()
+                AlertDialog.Builder(ctx).setTitle("Snippets")
+                    .setItems(keys) { _, i -> runConsole(InspectorScripts.SNIPPETS.getValue(keys[i])) }
+                    .show()
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun runConsole(code: String) {
+        if (code.isBlank()) return
+        prefs.lastConsoleCode = code
+        web.evaluateJavascript(InspectorScripts.console(gson.toJson(code))) { raw ->
+            val out = try { gson.fromJson(raw, String::class.java) } catch (_: Exception) { raw } ?: "null"
+            if (_binding == null) return@evaluateJavascript
+            AlertDialog.Builder(requireContext())
+                .setTitle("Result")
+                .setMessage(out.take(20000))
+                .setPositiveButton("Close", null)
+                .setNeutralButton("Copy") { _, _ -> ShareUtils.copyToClipboard(requireContext(), out, "JS result") }
+                .setNegativeButton("Again") { _, _ -> showConsole() }
+                .show()
+        }
+    }
+
+    // ---- user agent ----
+
+    private fun uaLabel() = when (prefs.uaPreset) {
+        "desktop" -> "Desktop"; "iphone" -> "iPhone"; "tv" -> "Android TV"; "custom" -> "Custom"; else -> "Mobile"
+    }
+
+    private fun chooseUserAgent() {
+        val keys = arrayOf("mobile", "desktop", "iphone", "tv", "custom")
+        val names = arrayOf("Mobile (this phone's Chrome)", "Desktop Chrome", "iPhone Safari", "Android TV", "Custom…")
+        AlertDialog.Builder(requireContext())
+            .setTitle("User agent")
+            .setSingleChoiceItems(names, keys.indexOf(prefs.uaPreset).coerceAtLeast(0)) { dlg, i ->
+                dlg.dismiss()
+                if (keys[i] == "custom") {
+                    val input = android.widget.EditText(requireContext()).apply { setText(prefs.customUa.ifBlank { currentUserAgent() }) }
+                    AlertDialog.Builder(requireContext()).setTitle("Custom user agent").setView(input)
+                        .setPositiveButton("Use") { _, _ -> prefs.customUa = input.text.toString().trim(); applyUserAgent("custom") }
+                        .setNegativeButton("Cancel", null).show()
+                } else applyUserAgent(keys[i])
+            }
+            .show()
+    }
+
+    private fun applyUserAgent(preset: String) {
+        prefs.uaPreset = preset
+        tabs.forEach { it.settings.userAgentString = currentUserAgent() }
+        updateModes()
+        web.reload()
+        toast("User agent: ${uaLabel()}")
     }
 
     private fun renderRecents() {
@@ -754,7 +947,6 @@ class BrowserFragment : Fragment() {
         private const val M_DEEP = 1
         private const val M_DOM = 2
         private const val M_ADS = 3
-        private const val M_DESKTOP = 4
         private const val M_PAUSE = 5
         private const val M_RECENT = 6
         private const val M_SNAPSHOT = 7
@@ -768,6 +960,12 @@ class BrowserFragment : Fragment() {
         private const val M_FORWARD = 15
         private const val M_SCRIPTS = 16
         private const val M_GRAB_SCRIPTS = 17
+        private const val M_PICK = 18
+        private const val M_CONSOLE = 19
+        private const val M_CHECKLIST = 20
+        private const val M_UA = 21
+        private const val M_PICKS = 22
+        private val SEGMENT_EXT = listOf(".ts", ".m4s", ".aac", ".vtt", ".srt", ".key", ".jpg", ".png")
         private const val M_RECENT_BASE = 100
         private const val MAX_TABS = 6
 
@@ -775,6 +973,8 @@ class BrowserFragment : Fragment() {
             "document.dispatchEvent(new Event('visibilitychange'));window.dispatchEvent(new Event('pageshow'));}catch(e){}})()"
 
         const val MOBILE_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+        const val IPHONE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1"
+        const val TV_UA = "Mozilla/5.0 (Linux; Android 12; BRAVIA 4K VH2 Build/STT1.211025.001.Z4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         const val DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     }
 }

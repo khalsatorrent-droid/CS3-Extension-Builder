@@ -59,4 +59,37 @@ class Prefs(context: Context) {
     }
 
     fun clearRecentSites() = sp.edit().remove("recent_sites").apply()
+
+    /** "mobile", "desktop", "iphone", "tv" or "custom". Old "Desktop site" toggle maps onto it. */
+    var uaPreset: String
+        get() = sp.getString("ua_preset", null) ?: if (desktopMode) "desktop" else "mobile"
+        set(v) { sp.edit().putString("ua_preset", v).apply(); desktopMode = v == "desktop" }
+
+    var customUa: String
+        get() = sp.getString("custom_ua", "") ?: ""
+        set(v) = sp.edit().putString("custom_ua", v).apply()
+
+    var lastConsoleCode: String
+        get() = sp.getString("console_code", "document.title") ?: "document.title"
+        set(v) = sp.edit().putString("console_code", v).apply()
+
+    /** Selectors picked in the browser, per site. */
+    fun loadSelectorHints() {
+        val raw = sp.getString("selector_hints", null) ?: return
+        try {
+            val type = object : com.google.gson.reflect.TypeToken<Map<String, Map<String, com.khalsatorrent.cs3builder.codegen.SelectorHints.Hint>>>() {}.type
+            val parsed: Map<String, Map<String, com.khalsatorrent.cs3builder.codegen.SelectorHints.Hint>> =
+                com.google.gson.Gson().fromJson(raw, type) ?: return
+            com.khalsatorrent.cs3builder.codegen.SelectorHints.load(parsed.mapValues { (_, m) ->
+                m.mapNotNull { (k, v) ->
+                    runCatching { com.khalsatorrent.cs3builder.codegen.SelectorHints.Role.valueOf(k) }.getOrNull()?.let { it to v }
+                }.toMap()
+            })
+        } catch (_: Exception) { }
+    }
+
+    fun saveSelectorHints() {
+        val data = com.khalsatorrent.cs3builder.codegen.SelectorHints.all().mapValues { (_, m) -> m.mapKeys { it.key.name } }
+        sp.edit().putString("selector_hints", com.google.gson.Gson().toJson(data)).apply()
+    }
 }
