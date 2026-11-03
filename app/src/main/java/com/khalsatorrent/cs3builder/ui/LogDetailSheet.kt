@@ -62,6 +62,7 @@ object LogDetailSheet {
         if (isPlayable(log)) {
             action("▶ Play") { PlayerActivity.start(context, log.url, log.pageUrl, playerHeaders(log)) }
         }
+        if (log.url.startsWith("http")) action("✎ Edit & resend") { ResendDialog.show(context, log) }
         action("URL") { ShareUtils.copyToClipboard(context, log.url, "URL") }
         action("cURL") { ShareUtils.copyToClipboard(context, LogExporter.curl(log), "cURL") }
         action("fetch()") { ShareUtils.copyToClipboard(context, LogExporter.fetchSnippet(log), "fetch()") }

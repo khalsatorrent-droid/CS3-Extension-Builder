@@ -4,6 +4,15 @@ All notable changes to CS3 Extension Builder will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **App Monitor** (Apps tab → pick an app → Monitor): a local VPN that only the chosen app is placed in and that routes only its DNS. Lists every server the app talks to — sorted API → video CDN → login/config → ads — with no certificate and without touching any other app. Servers also land in Logs; tap one to open it in the browser
+- **Element picker** (browser ⋮ → Pick element): tap anything on a page to get a CSS selector that matches it and its look-alikes, with a live match count, Parent/Child, and one-tap "use as Card / Card title / Poster / Episodes / Page title / Plot / Genres". The generator uses your picks instead of its guesses
+- **Capture checklist** in the capture bar (Home · Search · Title · Play) — tap it to see what is still missing before you generate
+- **Stream badge**: a ▶ N button appears as soon as playable media is captured
+- **JS console** with reverse-engineering snippets (video sources, iframes, storage, inline JSON, player globals…)
+- **User-agent presets**: Mobile, Desktop, iPhone, Android TV, Custom
+- **Edit & resend** on any request in Logs: change URL, headers or body and replay it; the reply is logged
+
 ## [2.0.11] - 2026-11-01
 
 ### Changed

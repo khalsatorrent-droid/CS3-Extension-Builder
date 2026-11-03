@@ -224,11 +224,15 @@ object SiteAnalyzer {
 
         val types = detectTypes(siteUrls + listOf(host), detail)
 
+        // Selectors the user picked in the browser win over the guesses
+        val (pickedCards, pickedDetail) = SelectorHints.apply(host, listingCards, detail)
+        if (SelectorHints.get(host).isNotEmpty()) notes += "Using ${SelectorHints.get(host).size} selector(s) you picked in the browser."
+
         return SiteAnalysis(
             baseUrl = baseUrl, host = host, providerName = name, language = language, tvTypes = types,
             headers = headers, cookies = cookies, usesCloudflare = cloudflare, search = search,
-            listingCards = listingCards, sections = sections, pagination = pagination,
-            detail = detail, detailUrl = detailEntry?.key, streams = streams, embeds = embeds, apis = apis,
+            listingCards = pickedCards, sections = sections, pagination = pagination,
+            detail = pickedDetail, detailUrl = detailEntry?.key, streams = streams, embeds = embeds, apis = apis,
             frameworks = frameworks, pagesAnalyzed = sitePages.size, notes = notes
         )
     }

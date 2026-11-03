@@ -10,15 +10,12 @@ An Android tool for building [CloudStream 3](https://github.com/recloudstream/cl
 - **Deep capture** (on by default): page and API requests are fetched by the app on the WebView's behalf, so each log has the real status code, request/response headers, cookies and response body. Redirects, video files and bot challenges (Cloudflare, DDoS-Guard) are handed back to the WebView automatically.
 - A capture script is injected at document start into **every frame**, including embedded players, recording fetch/XHR request + response bodies, response headers, WebSockets and `<video>` sources.
 - **Page snapshots** store the rendered HTML of each page (for JS-built sites).
-- ⋮ menu: deep capture, page snapshots, ad & popup blocking, desktop mode, pause capture, recent sites, view cookies, clear cookies & site data. Fullscreen video works.
+- **Element picker**: tap any element to get a CSS selector for it and its look-alikes, test it live, and save it as the site's card / title / poster / episodes / plot selector for the generator.
+- **Capture checklist** (Home · Search · Title · Play) in the capture bar, a **▶ stream badge**, a **JS console** with reverse-engineering snippets, and **user-agent presets** (mobile, desktop, iPhone, Android TV, custom).
+- ⋮ menu also has: deep capture, page snapshots, ad & popup blocking, pause capture, recent sites, cookies, clear site data, find in page. Popups open as tabs; fullscreen video works.
 
-**Apps tab — capture an app**
-Android can't run another APK inside this app, so the Apps tab works with a capture tool:
-1. Pick an installed app — you get step-by-step instructions.
-2. Record it with **Reqable** or **HttpCanary** (or PCAPdroid, which the app can start pre-filtered to that app with TLS decryption).
-3. Export a **HAR** file and tap **Import HAR** — the requests land in Logs and work with Generate like browser traffic.
-
-Apps that pin certificates won't reveal their HTTPS contents; most streaming apps share an API with their website, so try the site in the Browser tab too.
+**Apps tab — monitor an app**
+Pick an installed app and tap **Monitor**. The app opens inside a local VPN that only it uses and that carries only its DNS lookups, so you get the list of every server it talks to — API, video CDN, login/config, ads — with **no certificate**, and none of your other apps (banking included) are touched. Each server is in Logs too; open the API host in the Browser tab to go further. For full request contents, import a PCAP/HAR from PCAPdroid or Reqable.
 
 **Logs tab**
 Search across URLs, headers and bodies; filter by API / Streams / Pages / Main site / Errors; hide images/JS/CSS. Tap a request for everything about it (pretty-printed JSON, cURL, copy response). Export as a Claude-ready text log, HAR, or session JSON — or import HAR/session files.

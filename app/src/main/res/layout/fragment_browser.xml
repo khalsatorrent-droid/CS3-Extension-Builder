@@ -92,11 +92,14 @@
         android:id="@+id/captureBar"
         android:layout_width="match_parent"
         android:layout_height="40dp"
+        android:background="@color/capture_bar_bg"
+        android:clickable="true"
+        android:focusable="true"
         android:orientation="horizontal"
         android:paddingStart="12dp"
         android:paddingEnd="4dp"
         android:gravity="center_vertical"
-        android:background="@color/capture_bar_bg">
+>
 
         <View
             android:id="@+id/captureIndicator"
@@ -126,6 +129,22 @@
             android:textColor="#CCFFFFFF" />
 
         <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnStreams"
+            style="@style/Widget.Material3.Button"
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:layout_marginEnd="6dp"
+            android:backgroundTint="#FFD81B60"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:text="▶ 0"
+            android:textColor="@color/white"
+            android:textSize="11sp"
+            android:visibility="gone" />
+
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btnViewLogs"
             style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="wrap_content"
@@ -137,6 +156,38 @@
             android:text="Logs →"
             android:textSize="11sp" />
 
+    </LinearLayout>
+
+    <!-- Element picker bar (visible while pick mode is on) -->
+    <LinearLayout
+        android:id="@+id/pickBar"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:background="#FFFF2D55"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingEnd="4dp"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="🎯 Tap any element to get its CSS selector"
+            android:textColor="@color/white"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnPickDone"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:text="Done"
+            android:textSize="11sp" />
     </LinearLayout>
 
     <FrameLayout
