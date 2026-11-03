@@ -4,6 +4,11 @@ All notable changes to CS3 Extension Builder will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.12] - 2026-11-03
+
+### Changed
+- See commit log for details
+
 ### Added
 - **App Monitor** (Apps tab → pick an app → Monitor): a local VPN that only the chosen app is placed in and that routes only its DNS. Lists every server the app talks to — sorted API → video CDN → login/config → ads — with no certificate and without touching any other app. Servers also land in Logs; tap one to open it in the browser
 - **Element picker** (browser ⋮ → Pick element): tap anything on a page to get a CSS selector that matches it and its look-alikes, with a live match count, Parent/Child, and one-tap "use as Card / Card title / Poster / Episodes / Page title / Plot / Genres". The generator uses your picks instead of its guesses
