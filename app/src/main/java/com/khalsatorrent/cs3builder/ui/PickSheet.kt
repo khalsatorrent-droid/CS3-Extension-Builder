@@ -95,6 +95,40 @@ class PickSheet(
         }
         root.addView(HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false; addView(row2) })
 
+        // CSS section
+        val cssObj = o.getAsJsonObject("css")
+        if (cssObj != null && cssObj.size() > 0) {
+            val cssText = buildString {
+                appendLine("/* ${o.str("tag")}  —  computed styles */")
+                cssObj.entrySet()
+                    .sortedBy { it.key }
+                    .forEach { (k, v) -> appendLine("  $k: ${v.asString};") }
+            }
+            root.addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, (10 * dp).toInt(), 0, (4 * dp).toInt())
+                addView(TextView(context).apply {
+                    text = "CSS styles"
+                    setTypeface(typeface, Typeface.BOLD)
+                    textSize = 14f
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                })
+                addView(btn("Copy CSS") { ShareUtils.copyToClipboard(context, cssText, "CSS styles") })
+            })
+            root.addView(NestedScrollView(context).apply {
+                addView(TextView(context).apply {
+                    text = cssText
+                    typeface = Typeface.MONOSPACE
+                    textSize = 11f
+                    setTextIsSelectable(true)
+                    setBackgroundColor(0x11000000)
+                    setPadding((8 * dp).toInt(), (6 * dp).toInt(), (8 * dp).toInt(), (6 * dp).toInt())
+                })
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (context.resources.displayMetrics.heightPixels * 0.20).toInt())
+            })
+        }
+
         val details = StringBuilder()
         o.str("text").takeIf { it.isNotBlank() }?.let { details.appendLine("Text: $it").appendLine() }
         if (attrs.size() > 0) {
@@ -116,7 +150,7 @@ class PickSheet(
                 setTextIsSelectable(true)
                 setPadding(0, (10 * dp).toInt(), 0, 0)
             })
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (context.resources.displayMetrics.heightPixels * 0.32).toInt())
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (context.resources.displayMetrics.heightPixels * 0.25).toInt())
         })
 
         d.setContentView(root)
