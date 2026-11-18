@@ -4,6 +4,13 @@ All notable changes to CS3 Extension Builder will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **Pages that could not be scrolled** (e.g. a sign-in page whose "I accept the Terms" checkbox and button sat below the visible area). Pages that lock themselves with `overflow:hidden` are now un-clipped automatically after load, only where content really is cut off; the WebView also keeps ownership of vertical drags. Toggle: ⋮ → "Make clipped pages scrollable"
+
+### Added
+- **DRM playback in the browser**: Widevine/EME requests for the protected-media identifier are now granted, so encrypted streams can open a key session (hardware acceleration is declared explicitly for the main activity). Playback quality depends on the device's Widevine level
+- **WebAssembly**: `.wasm` modules are loaded by the WebView untouched (streaming compile and caching), and are no longer buffered by the capture hook
+
 ## [2.0.13] - 2026-11-08
 
 ### Changed

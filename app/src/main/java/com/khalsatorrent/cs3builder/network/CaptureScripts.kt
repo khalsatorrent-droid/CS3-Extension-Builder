@@ -49,7 +49,7 @@ object CaptureScripts {
     } catch (e) {}
     return o;
   }
-  function skipBody(ct) { return /video|audio|image|font|octet-stream|zip|pdf/i.test(ct || ''); }
+  function skipBody(ct) { return /video|audio|image|font|octet-stream|zip|pdf|wasm|iso\.segment|mp4|webm/i.test(ct || ''); }
 
   /* ---- fetch ---- */
   var _fetch = window.fetch;
@@ -155,6 +155,51 @@ object CaptureScripts {
     /** Returns the rendered DOM of the current frame (capped). */
     const val DOM_SNAPSHOT =
         "(function(){try{return document.documentElement.outerHTML.substring(0, 8000000);}catch(e){return '';}})()"
+
+    /**
+     * Un-clips pages that cannot be scrolled. Sign-in and landing pages often lock the page with
+     * `overflow:hidden` on html/body (or a viewport-sized wrapper) and assume the content fits, so
+     * on a short screen the bottom - a "I accept the Terms" checkbox, the submit button - is cut
+     * off and cannot be reached. This finds visible controls that sit below the viewport inside a
+     * container that really clips them, and makes only those containers scrollable. Pages that
+     * already scroll normally are left alone. Safe to inject repeatedly.
+     */
+    val SCROLL_FIX = """
+(function () {
+  if (window.__cs3ScrollFixTimers) return;
+  window.__cs3ScrollFixTimers = true;
+  var SEL = 'input,button,a,label,select,textarea,img,svg,p,h1,h2,h3,h4,h5,h6,li,[role="button"],[role="checkbox"]';
+  function fix() {
+    try {
+      var body = document.body, root = document.documentElement;
+      if (!body || !root) return;
+      var H = window.innerHeight || root.clientHeight;
+      var nodes = body.querySelectorAll(SEL), seen = [], n = Math.min(nodes.length, 4000);
+      for (var i = 0; i < n; i++) {
+        var el = nodes[i], r = el.getBoundingClientRect();
+        if (r.width < 2 || r.height < 2 || r.bottom <= H + 4) continue;
+        var cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) continue;
+        for (var a = el.parentElement; a; a = a.parentElement) {
+          if (seen.indexOf(a) >= 0) continue;
+          seen.push(a);
+          var ac = getComputedStyle(a);
+          if (/hidden|clip/.test(ac.overflowY) && a.scrollHeight > a.clientHeight + 4) {
+            a.style.setProperty('overflow-y', 'auto', 'important');
+            a.style.setProperty('-webkit-overflow-scrolling', 'touch', 'important');
+          }
+          if ((a === body || a === root) && ac.touchAction === 'none') {
+            a.style.setProperty('touch-action', 'auto', 'important');
+          }
+        }
+      }
+    } catch (e) {}
+  }
+  // SPAs render after load: check again a few times, then stop.
+  [0, 700, 2000, 4500].forEach(function (t) { setTimeout(fix, t); });
+  setTimeout(function () { window.__cs3ScrollFixTimers = false; }, 5000);
+})();
+""".trimIndent()
 
     /** Ad / popup suppression. Re-injected on every page while the blocker is on. */
     val AD_BLOCK = """

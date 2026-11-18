@@ -18,6 +18,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("ad_block", false)
         set(v) = sp.edit().putBoolean("ad_block", v).apply()
 
+    /** Make pages that clip their own bottom (overflow:hidden) scrollable. On by default. */
+    var scrollFix: Boolean
+        get() = sp.getBoolean("scroll_fix", true)
+        set(v) = sp.edit().putBoolean("scroll_fix", v).apply()
+
     var desktopMode: Boolean
         get() = sp.getBoolean("desktop_mode", false)
         set(v) = sp.edit().putBoolean("desktop_mode", v).apply()

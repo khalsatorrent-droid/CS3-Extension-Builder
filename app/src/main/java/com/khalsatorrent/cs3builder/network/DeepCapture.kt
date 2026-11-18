@@ -32,6 +32,11 @@ class DeepCapture(private val packageName: String) {
         if (scheme != "http" && scheme != "https") return false
         val headers = request.requestHeaders ?: emptyMap()
         if (headers.keys.any { it.equals("Range", true) }) return false
+        // WebAssembly modules go to the WebView untouched: it streams and caches them natively
+        // (instantiateStreaming needs the exact application/wasm response), and a copy through
+        // OkHttp gains nothing for a binary the generator cannot read anyway.
+        val path = request.url.path?.lowercase().orEmpty()
+        if (path.endsWith(".wasm") || path.endsWith(".wasm.gz")) return false
         val accept = headers.entries.firstOrNull { it.key.equals("Accept", true) }?.value
         return when (LogKind.classify(request.url.toString(), null, accept)) {
             // Scripts are normally skipped: a bundle is megabytes of minified code that no

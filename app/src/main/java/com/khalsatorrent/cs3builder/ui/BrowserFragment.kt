@@ -12,6 +12,7 @@ import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.webkit.CookieManager
+import android.webkit.PermissionRequest
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebStorage
@@ -154,6 +155,7 @@ class BrowserFragment : Fragment() {
                         if (webView !== web) return@runOnUiThread
                         if (!b.etUrl.hasFocus()) b.etUrl.setText(url)
                         b.btnBack.isEnabled = canGoBackAnywhere()
+                        if (prefs.scrollFix) webView.evaluateJavascript(CaptureScripts.SCROLL_FIX, null)
                         if (url.startsWith("http")) {
                             prefs.lastUrl = url
                             prefs.addRecentSite(url)
@@ -173,6 +175,15 @@ class BrowserFragment : Fragment() {
                 if (view !== web) return
                 b.progressBar.visibility = if (newProgress in 1..99) View.VISIBLE else View.INVISIBLE
                 b.progressBar.setProgressCompat(newProgress, true)
+            }
+            // DRM (Widevine / EME): the page asks for the protected-media identifier before it can
+            // open a key session. Without this grant requestMediaKeySystemAccess is refused and
+            // every encrypted stream fails. Only this one resource is granted; camera, microphone
+            // and the rest are still denied.
+            override fun onPermissionRequest(request: PermissionRequest?) {
+                request ?: return
+                val drm = request.resources.filter { it == PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID }
+                if (drm.isNotEmpty()) request.grant(drm.toTypedArray()) else request.deny()
             }
             override fun onShowCustomView(view: View?, callback: CustomViewCallback?) = enterFullscreen(view, callback)
             override fun onHideCustomView() = exitFullscreen()
@@ -203,6 +214,17 @@ class BrowserFragment : Fragment() {
             setSupportMultipleWindows(true)
             userAgentString = currentUserAgent()
         }
+        // The WebView must own vertical drags. The AppBar/Coordinator parents get a say in nested
+        // scrolling otherwise, and a page taller than the pane can feel stuck.
+        webView.isNestedScrollingEnabled = false
+        webView.isVerticalScrollBarEnabled = true
+        webView.overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+        @SuppressLint("ClickableViewAccessibility")
+        val keepDrag = View.OnTouchListener { v, e ->
+            if (e.actionMasked == android.view.MotionEvent.ACTION_DOWN) v.parent?.requestDisallowInterceptTouchEvent(true)
+            false
+        }
+        webView.setOnTouchListener(keepDrag)
         webView.addJavascriptInterface(client.JSBridge(), "CS3Bridge")
         webView.addJavascriptInterface(InspectorBridge(), "CS3Inspector")
 
@@ -260,6 +282,7 @@ class BrowserFragment : Fragment() {
         m.add(0, M_DEEP, 0, "Deep capture (status, headers, bodies)").setCheckable(true).isChecked = prefs.deepCapture
         m.add(0, M_DOM, 1, "Save rendered page HTML").setCheckable(true).isChecked = prefs.domSnapshots
         m.add(0, M_ADS, 2, "Block ads & popups").setCheckable(true).isChecked = prefs.adBlock
+        m.add(0, M_SCROLLFIX, 2, "Make clipped pages scrollable").setCheckable(true).isChecked = prefs.scrollFix
         m.add(1, M_PICK, 0, "🎯 Pick element → CSS selector")
         m.add(1, M_CONSOLE, 0, "⌨ JS console")
         m.add(1, M_CHECKLIST, 0, "✓ Capture checklist")
@@ -292,6 +315,9 @@ class BrowserFragment : Fragment() {
                 M_ADS -> { prefs.adBlock = !prefs.adBlock; updateModes()
                     if (prefs.adBlock) web.evaluateJavascript(CaptureScripts.AD_BLOCK, null)
                     toast(if (prefs.adBlock) "Ad & popup blocking on" else "Ad blocking off") }
+                M_SCROLLFIX -> { prefs.scrollFix = !prefs.scrollFix
+                    if (prefs.scrollFix) web.evaluateJavascript(CaptureScripts.SCROLL_FIX, null)
+                    toast(if (prefs.scrollFix) "Clipped pages will be made scrollable" else "Page scroll fix off") }
                 M_UA -> chooseUserAgent()
                 M_PICK -> setPicking(!picking)
                 M_CONSOLE -> showConsole()
@@ -965,6 +991,7 @@ class BrowserFragment : Fragment() {
         private const val M_CHECKLIST = 20
         private const val M_UA = 21
         private const val M_PICKS = 22
+        private const val M_SCROLLFIX = 23
         private val SEGMENT_EXT = listOf(".ts", ".m4s", ".aac", ".vtt", ".srt", ".key", ".jpg", ".png")
         private const val M_RECENT_BASE = 100
         private const val MAX_TABS = 6
