@@ -4,6 +4,12 @@ All notable changes to CS3 Extension Builder will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **Sign-in pages still stuck / cut off** (e.g. player.arcod.xyz: "I accept the Terms of Use" and the buttons below it unreachable). The scroll fix used to run for only ~5 seconds after load, so a login card rendered later stayed locked. It now stays active for the whole page (re-checks as the page changes), also unlocks html/body when the content is taller than the screen, and resets `touch-action` locks on any container
+
+### Added
+- ⋮ → **Force scroll (page stuck / cut off)**: aggressive fallback for stubborn pages — drops fixed heights on html/body and ignores page scripts that cancel touch/wheel scrolling
+
 ## [2.0.14] - 2026-11-18
 
 ### Changed

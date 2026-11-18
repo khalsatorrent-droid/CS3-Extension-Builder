@@ -283,6 +283,7 @@ class BrowserFragment : Fragment() {
         m.add(0, M_DOM, 1, "Save rendered page HTML").setCheckable(true).isChecked = prefs.domSnapshots
         m.add(0, M_ADS, 2, "Block ads & popups").setCheckable(true).isChecked = prefs.adBlock
         m.add(0, M_SCROLLFIX, 2, "Make clipped pages scrollable").setCheckable(true).isChecked = prefs.scrollFix
+        m.add(1, M_FORCE_SCROLL, 0, "⇵ Force scroll (page stuck / cut off)")
         m.add(1, M_PICK, 0, "🎯 Pick element → CSS selector")
         m.add(1, M_CONSOLE, 0, "⌨ JS console")
         m.add(1, M_CHECKLIST, 0, "✓ Capture checklist")
@@ -316,8 +317,10 @@ class BrowserFragment : Fragment() {
                     if (prefs.adBlock) web.evaluateJavascript(CaptureScripts.AD_BLOCK, null)
                     toast(if (prefs.adBlock) "Ad & popup blocking on" else "Ad blocking off") }
                 M_SCROLLFIX -> { prefs.scrollFix = !prefs.scrollFix
-                    if (prefs.scrollFix) web.evaluateJavascript(CaptureScripts.SCROLL_FIX, null)
+                    web.evaluateJavascript(if (prefs.scrollFix) CaptureScripts.SCROLL_FIX else CaptureScripts.SCROLL_FIX_STOP, null)
                     toast(if (prefs.scrollFix) "Clipped pages will be made scrollable" else "Page scroll fix off") }
+                M_FORCE_SCROLL -> { web.evaluateJavascript(CaptureScripts.SCROLL_FORCE, null)
+                    toast("Forced scrolling on for this page — try dragging now") }
                 M_UA -> chooseUserAgent()
                 M_PICK -> setPicking(!picking)
                 M_CONSOLE -> showConsole()
@@ -992,6 +995,7 @@ class BrowserFragment : Fragment() {
         private const val M_UA = 21
         private const val M_PICKS = 22
         private const val M_SCROLLFIX = 23
+        private const val M_FORCE_SCROLL = 24
         private val SEGMENT_EXT = listOf(".ts", ".m4s", ".aac", ".vtt", ".srt", ".key", ".jpg", ".png")
         private const val M_RECENT_BASE = 100
         private const val MAX_TABS = 6

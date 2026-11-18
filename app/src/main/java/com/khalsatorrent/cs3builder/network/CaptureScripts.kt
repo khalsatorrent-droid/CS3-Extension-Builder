@@ -160,46 +160,133 @@ object CaptureScripts {
      * Un-clips pages that cannot be scrolled. Sign-in and landing pages often lock the page with
      * `overflow:hidden` on html/body (or a viewport-sized wrapper) and assume the content fits, so
      * on a short screen the bottom - a "I accept the Terms" checkbox, the submit button - is cut
-     * off and cannot be reached. This finds visible controls that sit below the viewport inside a
-     * container that really clips them, and makes only those containers scrollable. Pages that
-     * already scroll normally are left alone. Safe to inject repeatedly.
+     * off and cannot be reached.
+     *
+     * It stays on for the life of the page: a MutationObserver re-checks whenever the page changes,
+     * so a login card that is rendered late (SPA, after an auth check) is still unlocked. It makes
+     * html/body scrollable when the content is taller than the screen, and makes only the
+     * containers that really clip a below-the-fold control scrollable. Pages that already scroll
+     * are left alone. Safe to inject repeatedly; `__cs3ScrollFix.stop()` switches it off.
+     *
+     * Set `window.__cs3ScrollForce = true` (menu: "Force scroll") for stubborn pages: it also
+     * drops fixed heights on html/body and ignores page scripts that cancel touch/wheel scrolling.
+     * (No dollar signs in here - this is a Kotlin raw string.)
      */
     val SCROLL_FIX = """
 (function () {
-  if (window.__cs3ScrollFixTimers) return;
-  window.__cs3ScrollFixTimers = true;
+  if (window.top !== window) return;
+  if (window.__cs3ScrollFix) { window.__cs3ScrollFix.start(); return; }
   var SEL = 'input,button,a,label,select,textarea,img,svg,p,h1,h2,h3,h4,h5,h6,li,[role="button"],[role="checkbox"]';
-  function fix() {
-    try {
-      var body = document.body, root = document.documentElement;
-      if (!body || !root) return;
-      var H = window.innerHeight || root.clientHeight;
-      var nodes = body.querySelectorAll(SEL), seen = [], n = Math.min(nodes.length, 4000);
-      for (var i = 0; i < n; i++) {
-        var el = nodes[i], r = el.getBoundingClientRect();
-        if (r.width < 2 || r.height < 2 || r.bottom <= H + 4) continue;
-        var cs = getComputedStyle(el);
-        if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) continue;
-        for (var a = el.parentElement; a; a = a.parentElement) {
-          if (seen.indexOf(a) >= 0) continue;
-          seen.push(a);
-          var ac = getComputedStyle(a);
-          if (/hidden|clip/.test(ac.overflowY) && a.scrollHeight > a.clientHeight + 4) {
-            a.style.setProperty('overflow-y', 'auto', 'important');
-            a.style.setProperty('-webkit-overflow-scrolling', 'touch', 'important');
-          }
-          if ((a === body || a === root) && ac.touchAction === 'none') {
-            a.style.setProperty('touch-action', 'auto', 'important');
-          }
-        }
-      }
-    } catch (e) {}
+  var timer = 0, idle = 0, stopped = false, observing = false, obs = null;
+
+  // Pages that lock scrolling usually cancel touchmove/wheel; honour that only when not forcing.
+  try {
+    var pd = Event.prototype.preventDefault;
+    Event.prototype.preventDefault = function () {
+      if (window.__cs3ScrollForce && (this.type === 'touchmove' || this.type === 'wheel')) return;
+      return pd.apply(this, arguments);
+    };
+  } catch (e) {}
+
+  function clips(v) { return v === 'hidden' || v === 'clip'; }
+  function open(el) {
+    el.style.setProperty('overflow-y', 'auto', 'important');
+    el.style.setProperty('-webkit-overflow-scrolling', 'touch', 'important');
   }
-  // SPAs render after load: check again a few times, then stop.
-  [0, 700, 2000, 4500].forEach(function (t) { setTimeout(fix, t); });
-  setTimeout(function () { window.__cs3ScrollFixTimers = false; }, 5000);
+  function touchOk(el, cs) {
+    if (cs.touchAction === 'none' || cs.touchAction === 'pan-x') {
+      el.style.setProperty('touch-action', 'auto', 'important');
+      return true;
+    }
+    return false;
+  }
+
+  function fix() {
+    var changed = false;
+    var body = document.body, root = document.documentElement;
+    if (!body || !root) return false;
+    var force = !!window.__cs3ScrollForce;
+    var H = window.innerHeight || root.clientHeight;
+
+    // 1. The page itself
+    var rc = getComputedStyle(root), bc = getComputedStyle(body);
+    var tall = Math.max(root.scrollHeight, body.scrollHeight) > H + 4;
+    if (tall || force) {
+      [[root, rc], [body, bc]].forEach(function (p) {
+        var el = p[0], cs = p[1];
+        if (clips(cs.overflowY) || (force && cs.overflowY !== 'auto' && cs.overflowY !== 'scroll')) { open(el); changed = true; }
+        if (touchOk(el, cs)) changed = true;
+        if (force && el.style.getPropertyValue('height') !== 'auto') {
+          el.style.setProperty('height', 'auto', 'important');
+          el.style.setProperty('max-height', 'none', 'important');
+          changed = true;
+        }
+      });
+    }
+
+    // 2. Containers that clip a visible control below the fold
+    var nodes = body.querySelectorAll(SEL), seen = new WeakSet(), n = Math.min(nodes.length, 3000);
+    for (var i = 0; i < n; i++) {
+      var el = nodes[i], r = el.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2 || r.bottom <= H + 4) continue;
+      var cs = getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) continue;
+      for (var a = el.parentElement; a && a !== body && a !== root; a = a.parentElement) {
+        if (seen.has(a)) break;
+        seen.add(a);
+        var ac = getComputedStyle(a);
+        if (clips(ac.overflowY) && a.clientHeight > 40 && (force || a.scrollHeight > a.clientHeight + 4)) {
+          open(a); changed = true;
+        }
+        if (touchOk(a, ac)) changed = true;
+      }
+    }
+    return changed;
+  }
+
+  function run() {
+    timer = 0;
+    if (stopped) return;
+    var c = false;
+    try { c = fix(); } catch (e) {}
+    idle = c ? 0 : idle + 1;
+  }
+  function schedule() {
+    if (stopped || timer) return;
+    timer = setTimeout(run, idle > 20 ? 3000 : 500);
+  }
+
+  function start() {
+    stopped = false; idle = 0;
+    if (!observing && document.documentElement) {
+      try {
+        obs = new MutationObserver(schedule);
+        obs.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
+        observing = true;
+      } catch (e) {}
+    }
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(run, 0);
+  }
+  function stop() {
+    stopped = true;
+    if (timer) { clearTimeout(timer); timer = 0; }
+    if (obs) { obs.disconnect(); observing = false; }
+  }
+
+  window.addEventListener('resize', function () { idle = 0; schedule(); });
+  window.addEventListener('orientationchange', function () { idle = 0; schedule(); });
+  window.__cs3ScrollFix = { start: start, stop: stop };
+  start();
 })();
 """.trimIndent()
+
+    /** Same fix, but aggressive - for the menu's "Force scroll" on a page that is still stuck. */
+    val SCROLL_FORCE = "window.__cs3ScrollForce = true;\n" + SCROLL_FIX
+
+    /** Switches the scroll fix off for the current page (menu toggle). */
+    const val SCROLL_FIX_STOP =
+        "(function(){window.__cs3ScrollForce=false;try{window.__cs3ScrollFix&&window.__cs3ScrollFix.stop();}catch(e){}})()"
 
     /** Ad / popup suppression. Re-injected on every page while the blocker is on. */
     val AD_BLOCK = """
