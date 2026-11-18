@@ -4,6 +4,11 @@ All notable changes to CS3 Extension Builder will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.14] - 2026-11-18
+
+### Changed
+- See commit log for details
+
 ### Fixed
 - **Pages that could not be scrolled** (e.g. a sign-in page whose "I accept the Terms" checkbox and button sat below the visible area). Pages that lock themselves with `overflow:hidden` are now un-clipped automatically after load, only where content really is cut off; the WebView also keeps ownership of vertical drags. Toggle: ⋮ → "Make clipped pages scrollable"
 
